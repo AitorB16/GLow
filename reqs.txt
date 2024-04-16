@@ -1,0 +1,11 @@
+torch
+torchvision
+flwr[simulation]
+pandas
+pathlib
+hydra-core
+omegaconf
+gower
+matplotlib
+pyyaml
+numpy

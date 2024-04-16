@@ -1,0 +1,14 @@
+run_name: 'F01'
+num_rounds: 200
+num_clients: 8
+num_clients_per_round_fit: 3
+num_clients_per_round_eval: 3
+batch_size: 128
+num_classes: 10 #output layer size
+balance_data: False
+seed: 2024
+config_fit:
+  lr: 0.0001
+  momentum: 0.9
+  local_epochs: 10
+  IDs: 100
