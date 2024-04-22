@@ -1,6 +1,6 @@
 run_name: 'F01'
-num_rounds: 200
-num_clients: 8
+num_rounds: 2
+num_clients: 4
 num_clients_per_round_fit: 3
 num_clients_per_round_eval: 3
 batch_size: 128

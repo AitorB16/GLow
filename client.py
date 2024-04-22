@@ -12,6 +12,8 @@ class FlowerClient(fl.client.NumPyClient):
         
         self.cid = cid
 
+        self.idx = None
+
         self.trainloader = trainloader
         self.validationloader = validationloader
 
@@ -41,14 +43,14 @@ class FlowerClient(fl.client.NumPyClient):
         distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.device)
         
         #send how many training instances does a particular client have
-        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr, 'id_sample': config['ID'] ,'id_cli_manager': self.cid, 'energy used': '10W', 'distr_val_loss': '##'}
+        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr, 'idx': config['idx'] ,'cid': self.cid, 'energy used': '10W', 'distr_val_loss': '##'}
     
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         self.set_parameters(parameters)
         loss, accuracy = test(self.model, self.validationloader, self.device)
         #print('acc_distr: ' + str(accuracy))
-        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'id_sample': config['ID'], 'id_cli_manager': self.cid} #send anything, time it took to evaluation, memory usage...
+        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'idx': config['idx'], 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
     
 
 
@@ -61,22 +63,26 @@ def meta_generate_client_fn(vcid, trainloaders, validationloaders, num_classes):
 def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
     acc = []
     vcid = []
+    vidx = []
     for num_examples, m in metrics:
         acc.append(m['acc_distr'])
-        vcid.append(m['id'])
+        vcid.append(m['cid'])
+        vidx.append(m['idx'])
 
     # Aggregate and return custom metric (weighted average)
-    return {"acc_distr": acc, "cid": vcid}
+    return {"acc_distr": acc, "cid": vcid, "idx": vidx}
 
 def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
     acc = []
     vcid = []
+    vidx = []
     for num_examples, m in metrics:
         acc.append(m['acc_val_distr'])
-        vcid.append(m['id'])
+        vcid.append(m['cid'])
+        vidx.append(m['idx'])
 
     # Aggregate and return custom metric (weighted average)
-    return {"acc_val_distr": acc, "cid": vcid}
+    return {"acc_val_distr": acc, "cid": vcid, "idx": vidx}
 
 #def generate_client_fn(trainloaders, validationloaders, first_layer_size, num_classes):
 #    def client_fn(cid: str):

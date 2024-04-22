@@ -38,8 +38,8 @@ from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
-from flwr.server.stategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
-from flwr.server.stategy.aggregate.strategy import Strategy
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
+from flwr.server.strategy.strategy import Strategy
 
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
 Setting `min_available_clients` lower than `min_fit_clients` or
@@ -184,17 +184,17 @@ class cli_FedAvg(Strategy):
 
         """Configure the next round of training."""
         config = {}
-        id = 0
+        idx = 0
         if self.on_fit_config_fn is not None:
             # Custom fit config function provided
             config = self.on_fit_config_fn(server_round)
-            id = config['IDs']
+            #id = config['IDs']
         pairs = []
         for client in clients:
-            config['ID'] = id
+            config['idx'] = idx
             fit_ins = FitIns(parameters, config)
-            pairs.append(client, fit_ins)
-            id = id + 1
+            pairs.append((client, fit_ins))
+            idx = idx + 1
 
         # Return client/config pairs
         return pairs
@@ -207,13 +207,6 @@ class cli_FedAvg(Strategy):
         if self.fraction_evaluate == 0.0:
             return []
 
-        # Parameters and config
-        config = {}
-        if self.on_evaluate_config_fn is not None:
-            # Custom evaluation config function provided
-            config = self.on_evaluate_config_fn(server_round)
-        evaluate_ins = EvaluateIns(parameters, config)
-
         # Sample clients
         sample_size, min_num_clients = self.num_evaluation_clients(
             client_manager.num_available()
@@ -222,8 +215,23 @@ class cli_FedAvg(Strategy):
             num_clients=sample_size, min_num_clients=min_num_clients
         )
 
+        # Parameters and config
+        config = {}
+        idx = 0
+        if self.on_evaluate_config_fn is not None:
+            # Custom fit config function provided
+            config = self.on_evaluate_config_fn(server_round)
+            #id = config['IDs']
+        pairs = []
+        for client in clients:
+            config['idx'] = idx
+            evaluate_ins = EvaluateIns(parameters, config)
+            pairs.append((client, evaluate_ins))
+            idx = idx + 1
+
         # Return client/config pairs
-        return [(client, evaluate_ins) for client in clients]
+        return pairs
+        #return [(client, evaluate_ins) for client in clients]
 
     def aggregate_fit(
         self,

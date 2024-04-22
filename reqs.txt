@@ -5,7 +5,4 @@ pandas
 pathlib
 hydra-core
 omegaconf
-gower
 matplotlib
-pyyaml
-numpy

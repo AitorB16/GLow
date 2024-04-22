@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 import pandas as pd
 
-from create_matrix_simpl import create_matrix
 from dataset import prepare_dataset
 
 import matplotlib.pyplot as plt
