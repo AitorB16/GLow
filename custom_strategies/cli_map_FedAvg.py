@@ -41,6 +41,8 @@ from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
+from  flwr.server.criterion import Criterion
+
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
 Setting `min_available_clients` lower than `min_fit_clients` or
 `min_evaluate_clients` can cause the server to fail when there are too few clients
@@ -137,6 +139,7 @@ class cli_FedAvg(Strategy):
         rep = f"FedAvg(accept_failures={self.accept_failures})"
         return rep
 
+      
     def num_fit_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Return the sample size and the required number of available clients."""
         num_clients = int(num_available_clients * self.fraction_fit)
@@ -173,28 +176,35 @@ class cli_FedAvg(Strategy):
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, FitIns]]:
 
+        '''Implementing abstract class'''
+        class select_criterion(Criterion):
+            def __init__(self, cid_list):
+                self.cid_list = cid_list
+            def select(self, client: ClientProxy) -> bool:
+                return client.cid in self.cid_list
+
         # Sample clients
         sample_size, min_num_clients = self.num_fit_clients(
             client_manager.num_available()
         )
 
+        cid_list = [0, 1]
+
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
+            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(cid_list)
         )
 
         """Configure the next round of training."""
         config = {}
-        idx = 0
         if self.on_fit_config_fn is not None:
             # Custom fit config function provided
             config = self.on_fit_config_fn(server_round)
-            #id = config['IDs']
         pairs = []
         for client in clients:
-            config['idx'] = idx
+            print(client.cid)
+            print('#######')
             fit_ins = FitIns(parameters, config)
             pairs.append((client, fit_ins))
-            idx = idx + 1
 
         # Return client/config pairs
         return pairs
@@ -202,6 +212,14 @@ class cli_FedAvg(Strategy):
     def configure_evaluate(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, EvaluateIns]]:
+        
+        '''Implementing abstract class'''
+        class select_criterion(Criterion):
+            def __init__(self, cid_list):
+                self.cid_list = cid_list
+            def select(self, client: ClientProxy) -> bool:
+                return client.cid in self.cid_list     
+
         """Configure the next round of evaluation."""
         # Do not configure federated evaluation if fraction eval is 0.
         if self.fraction_evaluate == 0.0:
@@ -211,23 +229,22 @@ class cli_FedAvg(Strategy):
         sample_size, min_num_clients = self.num_evaluation_clients(
             client_manager.num_available()
         )
+
+        cid_list = [0, 1]
+
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
+            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(cid_list)
         )
 
         # Parameters and config
         config = {}
-        idx = 0
         if self.on_evaluate_config_fn is not None:
             # Custom fit config function provided
             config = self.on_evaluate_config_fn(server_round)
-            #id = config['IDs']
         pairs = []
         for client in clients:
-            config['idx'] = idx
             evaluate_ins = EvaluateIns(parameters, config)
             pairs.append((client, evaluate_ins))
-            idx = idx + 1
 
         # Return client/config pairs
         return pairs

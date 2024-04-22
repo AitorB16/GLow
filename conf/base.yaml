@@ -1,8 +1,8 @@
 run_name: 'F01'
 num_rounds: 2
 num_clients: 4
-num_clients_per_round_fit: 3
-num_clients_per_round_eval: 3
+num_clients_per_round_fit: 2
+num_clients_per_round_eval: 2
 batch_size: 128
 num_classes: 10 #output layer size
 balance_data: False

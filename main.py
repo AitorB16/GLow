@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 import yaml
 
 from dataset import prepare_dataset
-from client import cli_eval_distr_results, cli_val_distr, meta_generate_client_fn#, generate_client_fn, weighted_average, 
+from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
 
@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
     #3. DEFINE YOUR CLIENTS
     #client_fn = generate_client_fn(trainloaders, validationloaders, first_layer_size, cfg.num_classes)
     vcid = np.arange(cfg.num_clients) #Client IDs
-    client_fn = meta_generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes)
+    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes)
 
     #4. DEFINE STRATEGY
     #strategy = fl.server.strategy.FedAvg(fraction_fit=0.00001,
@@ -61,6 +61,7 @@ def main(cfg: DictConfig):
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=cfg.num_clients,
+        clients_ids = vcid,
         config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
         strategy=strategy,
         client_resources={'num_cpus': 4, 'num_gpus': 0.25}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
@@ -88,7 +89,7 @@ def main(cfg: DictConfig):
     print('#################')
     print(str(history.metrics_centralized))
     out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
-    out2 = out1 + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']]) + '\n\n** cli_sample: ' +  ' '.join([str(elem) for elem in history.metrics_distributed['idx']])
+    out2 = out1 + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
     out3 = out2 + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
     f = open(save_path + "/output.out", "w")
     f.write(out3)
