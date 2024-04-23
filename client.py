@@ -47,7 +47,6 @@ class FlowerClient(fl.client.NumPyClient):
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         self.set_parameters(parameters)
         loss, accuracy = test(self.model, self.validationloader, self.device)
-        #print('acc_distr: ' + str(accuracy))
         return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
     
 
@@ -78,12 +77,7 @@ def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List
     # Aggregate and return custom metric (weighted average)
     return {"acc_val_distr": acc, "cid": vcid}
 
-#def generate_client_fn(trainloaders, validationloaders, first_layer_size, num_classes):
-#    def client_fn(cid: str):
-#        return FlowerClient(trainloader=trainloaders[int(cid)], validationloader=validationloaders[int(cid)], first_layer_size=first_layer_size, num_classes=num_classes).to_client()
-#    
-#    return client_fn
-#
+
 #def weighted_average(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, float]:
 #    # Multiply accuracy of each client by number of examples used
 #    accuracies = [num_examples * m["acc_distr"] for num_examples, m in metrics]
