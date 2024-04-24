@@ -18,6 +18,7 @@ Paper: arxiv.org/abs/1602.05629
 """
 
 import flwr
+import numpy as np
 
 from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -43,6 +44,9 @@ from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
 
+from flwr.common.typing import GetParametersIns
+
+
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
 Setting `min_available_clients` lower than `min_fit_clients` or
 `min_evaluate_clients` can cause the server to fail when there are too few clients
@@ -52,7 +56,7 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 
 # pylint: disable=line-too-long
-class cli_FedAvg(Strategy):
+class topology_based_Avg(Strategy):
     """Federated Averaging strategy.
 
     Implementation based on https://arxiv.org/abs/1602.05629
@@ -93,6 +97,7 @@ class cli_FedAvg(Strategy):
     def __init__(
         self,
         *,
+        topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
         min_fit_clients: int = 2,
@@ -107,7 +112,8 @@ class cli_FedAvg(Strategy):
         on_fit_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         on_evaluate_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         accept_failures: bool = True,
-        initial_parameters: Optional[Parameters] = None,
+        initial_parameters: Optional[list[Parameters]] = None,
+        pool_parameters: Optional[list[Parameters]] = None,
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         inplace: bool = True,
@@ -120,16 +126,20 @@ class cli_FedAvg(Strategy):
         ):
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
+        self.topology = topology
         self.fraction_fit = fraction_fit
         self.fraction_evaluate = fraction_evaluate
         self.min_fit_clients = min_fit_clients
         self.min_evaluate_clients = min_evaluate_clients
         self.min_available_clients = min_available_clients
+        self.client_list = np.arange(min_available_clients)
         self.evaluate_fn = evaluate_fn
         self.on_fit_config_fn = on_fit_config_fn
         self.on_evaluate_config_fn = on_evaluate_config_fn
         self.accept_failures = accept_failures
         self.initial_parameters = initial_parameters
+        self.pool_parameters = pool_parameters
+        self.selected_pool = 0
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.inplace = inplace
@@ -149,14 +159,30 @@ class cli_FedAvg(Strategy):
         """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
+    
 
     def initialize_parameters(
         self, client_manager: ClientManager
     ) -> Optional[Parameters]:
         """Initialize global model parameters."""
-        initial_parameters = self.initial_parameters
-        self.initial_parameters = None  # Don't keep initial parameters in memory
+        clients = client_manager.sample(self.min_available_clients) #Sample all clients
+        ins = GetParametersIns(config={})
+        
+        for client in clients:
+            self.initial_parameters[client.cid] = client.get_parameters(ins=ins)
+            self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
+
+
+        initial_parameters = self.initial_parameters[0]
         return initial_parameters
+
+
+    #def select_parameters(self, client_manager: ClientManager, cid: int) -> Optional[Parameters]:
+    #    """Initialize global model parameters."""
+    #    selected_parameters = self.pool_parameters[cid]
+    #    return selected_parameters
+
+
 
     def evaluate(
         self, server_round: int, parameters: Parameters
@@ -165,7 +191,8 @@ class cli_FedAvg(Strategy):
         if self.evaluate_fn is None:
             # No evaluation function provided
             return None
-        parameters_ndarrays = parameters_to_ndarrays(parameters)
+        #parameters_ndarrays = parameters_to_ndarrays(parameters)
+        parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
         eval_res = self.evaluate_fn(server_round, parameters_ndarrays, {})
         if eval_res is None:
             return None
@@ -187,11 +214,12 @@ class cli_FedAvg(Strategy):
         sample_size, min_num_clients = self.num_fit_clients(
             client_manager.num_available()
         )
-
-        cid_list = [0, 1]
+        
+        self.selected_pool = self.client_list.append(self.client_list.pop(0)) #pick first rotate list
+        connections = self.topology[self.selected_pool]
 
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(cid_list)
+            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
         )
 
         """Configure the next round of training."""
@@ -203,7 +231,8 @@ class cli_FedAvg(Strategy):
         for client in clients:
             print(client.cid)
             print('#######')
-            fit_ins = FitIns(parameters, config)
+            #fit_ins = FitIns(parameters, config)
+            fit_ins = FitIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, fit_ins))
 
         # Return client/config pairs
@@ -230,10 +259,15 @@ class cli_FedAvg(Strategy):
             client_manager.num_available()
         )
 
-        cid_list = [0, 1]
+        # Sample clients
+        sample_size, min_num_clients = self.num_fit_clients(
+            client_manager.num_available()
+        )
+        
+        connections = self.topology[self.selected_pool]
 
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(cid_list)
+            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
         )
 
         # Parameters and config
@@ -243,12 +277,13 @@ class cli_FedAvg(Strategy):
             config = self.on_evaluate_config_fn(server_round)
         pairs = []
         for client in clients:
-            evaluate_ins = EvaluateIns(parameters, config)
+            #evaluate_ins = EvaluateIns(parameters, config)
+            evaluate_ins = EvaluateIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, evaluate_ins))
 
         # Return client/config pairs
         return pairs
-        #return [(client, evaluate_ins) for client in clients]
+    
 
     def aggregate_fit(
         self,
@@ -283,6 +318,8 @@ class cli_FedAvg(Strategy):
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No fit_metrics_aggregation_fn provided")
+
+        self.pool_parameters[self.selected_pool] = parameters_aggregated
 
         return parameters_aggregated, metrics_aggregated
 

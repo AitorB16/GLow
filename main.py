@@ -21,24 +21,7 @@ from flwr.client import ClientFn
 from flwr.server.client_manager import ClientManager, SimpleClientManager
 
 
-from custom_strategies.cli_map_FedAvg import cli_FedAvg
-
-from multiprocessing import Process
-
-#import threading
-
-def start_simul_multi(id: int, client_fn: ClientFn, num_clients: Optional[int], clients_ids: Optional[List[str]], server: Optional[fl.server.Server], config: Optional[fl.server.ServerConfig], strategy: Optional[cli_FedAvg], client_resources: Optional[Dict[str, float]]):
-    print(id)
-    tmp_history = fl.simulation.start_simulation(
-        client_fn=client_fn,
-        num_clients=num_clients,
-        clients_ids = clients_ids,
-        server = server,
-        config= config,
-        strategy= strategy,
-        client_resources= client_resources, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
-    )
-    return tmp_history
+from custom_strategies.topology_based_GL import topology_based_Avg
 
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
@@ -54,18 +37,26 @@ def main(cfg: DictConfig):
     vcid = np.arange(cfg.num_clients) #Client IDs
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes)
 
+    #LOAD TOPOLOGY - EDGES
+    topology = []
+    for cli_ID in vcid:
+        topology.append(cfg.edges['n'+str(cli_ID)])
+        print(topology[cli_ID])
+
+
     #4. DEFINE STRATEGY
-    
-    strategy = cli_FedAvg(fraction_fit=0.00001,
-                                         min_fit_clients=cfg.num_clients_per_round_fit,
-                                         fraction_evaluate=0.00001,
-                                         min_evaluate_clients=cfg.num_clients_per_round_eval,
-                                         min_available_clients=cfg.num_clients,
-                                         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
-                                         evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
-                                         fit_metrics_aggregation_fn = cli_val_distr,
-                                         evaluate_metrics_aggregation_fn = cli_eval_distr_results #LOCAL METRICS CLIENT
-                                         )
+    strategy = topology_based_Avg(
+        topology=topology,
+        fraction_fit=0.00001,
+        min_fit_clients=cfg.num_clients_per_round_fit,
+        fraction_evaluate=0.00001,
+        min_evaluate_clients=cfg.num_clients_per_round_eval,
+        min_available_clients=cfg.num_clients,
+        on_fit_config_fn=get_on_fit_config(cfg.config_fit),
+        evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
+        fit_metrics_aggregation_fn = cli_val_distr,
+        evaluate_metrics_aggregation_fn = cli_eval_distr_results #LOCAL METRICS CLIENT
+    )
 
     strategy_pool = []
     for cli_ID in vcid:
@@ -79,26 +70,16 @@ def main(cfg: DictConfig):
     for cli_ID in vcid:
         server_pool.append(fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy))
 
-    #MAKE PARALLEL FUNCS
-    history_pool = []
-    for cli_ID in vcid:
-        #5. SIMULATE
-        history_pool.append(
-            Process(
-            target=start_simul_multi(
-                id=cli_ID,
-                client_fn=client_fn,
-                num_clients=cfg.num_clients,
-                clients_ids = vcid,
-                server = server_pool[cli_ID],
-                config=server_config_pool[cli_ID],
-                strategy=strategy_pool[cli_ID],
-                client_resources={'num_cpus': 4, 'num_gpus': 0.25}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
-                )
-            ).start()
-        )
-
-    history = history_pool[0]
+ 
+    history = fl.simulation.start_simulation(
+        client_fn=client_fn,
+        num_clients=cfg.num_clients,
+        clients_ids = vcid,
+        server = server_pool[0],
+        config=server_config_pool[0],
+        strategy=strategy_pool[0],
+        client_resources={'num_cpus': 4, 'num_gpus': 0.2}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+    )
 
     #6. SAVE RESULTS
     results_path = Path(save_path) / "results.pkl"
@@ -128,21 +109,3 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-    #for cli_ID in vcid:
-    #    threading.Thread(
-    #        target=start_simul_multi(
-    #            id=cli_ID,
-    #            client_fn=client_fn,
-    #            num_clients=cfg.num_clients,
-    #            clients_ids = vcid,
-    #            server = server_pool[cli_ID],
-    #            config=server_config_pool[cli_ID],
-    #            strategy=strategy_pool[cli_ID],
-    #            client_resources={'num_cpus': 4, 'num_gpus': 0.25}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
-    #            )
-    #    ).start()

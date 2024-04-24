@@ -1,6 +1,12 @@
-run_name: 'F01'
-num_rounds: 2
-num_clients: 4
+run_name: 'R1'
+num_clients: 5
+edges: #topology
+  n0: [1, 4]
+  n1: [0, 2]
+  n2: [1, 3]
+  n3: [2, 4]
+  n4: [0, 3]
+num_rounds: 32
 num_clients_per_round_fit: 2
 num_clients_per_round_eval: 2
 batch_size: 128
@@ -11,4 +17,4 @@ config_fit:
   lr: 0.0001
   momentum: 0.9
   local_epochs: 10
-  IDs: 100
+
