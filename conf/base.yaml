@@ -1,5 +1,5 @@
 run_name: 'R1'
-num_clients: 5
+num_clients: 100
 edges: #topology
   n0: [1, 4]
   n1: [0, 2]

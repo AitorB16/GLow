@@ -20,7 +20,7 @@ Paper: arxiv.org/abs/1602.05629
 import flwr
 import numpy as np
 
-from logging import WARNING
+from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from flwr.common import (
@@ -112,8 +112,8 @@ class topology_based_Avg(Strategy):
         on_fit_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         on_evaluate_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         accept_failures: bool = True,
-        initial_parameters: Optional[list[Parameters]] = None,
-        pool_parameters: Optional[list[Parameters]] = None,
+        initial_parameters: Optional[List[Parameters]] = None,
+        pool_parameters: Optional[List[Parameters]] = None,
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         inplace: bool = True,
@@ -139,7 +139,7 @@ class topology_based_Avg(Strategy):
         self.accept_failures = accept_failures
         self.initial_parameters = initial_parameters
         self.pool_parameters = pool_parameters
-        self.selected_pool = 0
+        self.selected_pool = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.inplace = inplace
@@ -168,12 +168,20 @@ class topology_based_Avg(Strategy):
         clients = client_manager.sample(self.min_available_clients) #Sample all clients
         ins = GetParametersIns(config={})
         
-        for client in clients:
-            self.initial_parameters[client.cid] = client.get_parameters(ins=ins)
-            self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
+        if self.initial_parameters is None:
+            self.initial_parameters = [None] * self.min_available_clients
+            self.pool_parameters = [None] * self.min_available_clients
 
+            for client in clients:
+                #print(client.cid)
+                self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=90.0).parameters
+                #self.initial_parameters.append(client.get_parameters(ins=ins, timeout=90.0))
+                self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
+                #self.pool_parameters.append(self.initial_parameters[client.cid])
 
-        initial_parameters = self.initial_parameters[0]
+        
+        initial_parameters = self.initial_parameters[0] #Params from first pool for initialization
+        self.selected_pool = 0
         return initial_parameters
 
 
@@ -182,7 +190,7 @@ class topology_based_Avg(Strategy):
     #    selected_parameters = self.pool_parameters[cid]
     #    return selected_parameters
 
-
+    #log(INFO, "FL starting")
 
     def evaluate(
         self, server_round: int, parameters: Parameters
@@ -215,7 +223,10 @@ class topology_based_Avg(Strategy):
             client_manager.num_available()
         )
         
-        self.selected_pool = self.client_list.append(self.client_list.pop(0)) #pick first rotate list
+        #self.selected_pool = self.client_list.append(self.client_list.pop(0)) #pick first rotate list
+        self.selected_pool = self.client_list[0]
+        self.client_list = np.roll(self.client_list, -1, axis=1).tolist()
+
         connections = self.topology[self.selected_pool]
 
         clients = client_manager.sample(
@@ -229,8 +240,8 @@ class topology_based_Avg(Strategy):
             config = self.on_fit_config_fn(server_round)
         pairs = []
         for client in clients:
-            print(client.cid)
-            print('#######')
+            #print(client.cid)
+            #print('#######')
             #fit_ins = FitIns(parameters, config)
             fit_ins = FitIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, fit_ins))
