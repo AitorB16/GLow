@@ -5,7 +5,7 @@
 #SBATCH --output=logs/M_%A_%a.out
 #SBATCH --error=logs/M_%A_%a.err
 
-#SBATCH --ntasks=4
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --threads-per-core=1
 # #SBATCH --ntasks-per-core=1

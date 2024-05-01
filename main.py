@@ -40,8 +40,8 @@ def main(cfg: DictConfig):
     #LOAD TOPOLOGY - EDGES
     topology = []
     for cli_ID in vcid:
-        topology.append(cfg.edges['n'+str(cli_ID)])
-        print(topology[cli_ID])
+        topology.append(cfg.pools['p'+str(cli_ID)])
+        #print(topology[cli_ID])
 
 
     #4. DEFINE STRATEGY
@@ -55,7 +55,9 @@ def main(cfg: DictConfig):
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
         fit_metrics_aggregation_fn = cli_val_distr,
-        evaluate_metrics_aggregation_fn = cli_eval_distr_results #LOCAL METRICS CLIENT
+        evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
+        total_rounds = cfg.num_rounds,
+        save_path = save_path
     )
 
     strategy_pool = []
@@ -103,7 +105,7 @@ def main(cfg: DictConfig):
     out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out2 = out1 + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
     out3 = out2 + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
-    f = open(save_path + "/output.out", "w")
+    f = open(save_path + "/raw_output.out", "w")
     f.write(out3)
     f.close()
 

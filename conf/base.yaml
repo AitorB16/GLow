@@ -1,14 +1,14 @@
 run_name: 'R1'
-num_clients: 100
-edges: #topology
-  n0: [1, 4]
-  n1: [0, 2]
-  n2: [1, 3]
-  n3: [2, 4]
-  n4: [0, 3]
-num_rounds: 32
-num_clients_per_round_fit: 2
-num_clients_per_round_eval: 2
+num_clients: 5
+pools: #topology
+  p0: [1, 0, 4]
+  p1: [0, 1, 2]
+  p2: [1, 2, 3]
+  p3: [2, 3, 4]
+  p4: [0, 4, 3]
+num_rounds: 300
+num_clients_per_round_fit: 3
+num_clients_per_round_eval: 3
 batch_size: 128
 num_classes: 10 #output layer size
 balance_data: False
@@ -16,5 +16,5 @@ seed: 2024
 config_fit:
   lr: 0.0001
   momentum: 0.9
-  local_epochs: 10
+  local_epochs: 2
 

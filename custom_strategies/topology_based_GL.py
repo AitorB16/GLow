@@ -97,6 +97,7 @@ class topology_based_Avg(Strategy):
     def __init__(
         self,
         *,
+        total_rounds: int,
         topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
@@ -117,6 +118,7 @@ class topology_based_Avg(Strategy):
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         inplace: bool = True,
+        save_path: str
     ) -> None:
         super().__init__()
 
@@ -126,6 +128,7 @@ class topology_based_Avg(Strategy):
         ):
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
+        self.total_rounds = total_rounds
         self.topology = topology
         self.fraction_fit = fraction_fit
         self.fraction_evaluate = fraction_evaluate
@@ -143,6 +146,9 @@ class topology_based_Avg(Strategy):
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.inplace = inplace
+        self.pool_metrics = [None] * self.min_available_clients
+        self.pool_losses = [None] * self.min_available_clients
+        self.save_path = save_path
 
     def __repr__(self) -> str:
         """Compute a string representation of the strategy."""
@@ -174,7 +180,7 @@ class topology_based_Avg(Strategy):
 
             for client in clients:
                 #print(client.cid)
-                self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=90.0).parameters
+                self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=None).parameters
                 #self.initial_parameters.append(client.get_parameters(ins=ins, timeout=90.0))
                 self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
                 #self.pool_parameters.append(self.initial_parameters[client.cid])
@@ -205,6 +211,20 @@ class topology_based_Avg(Strategy):
         if eval_res is None:
             return None
         loss, metrics = eval_res
+
+        '''Track each pool metrics and results'''
+        self.pool_losses[self.selected_pool] = loss
+        self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+        
+        '''Save pool results in last rounds'''
+        if server_round == self.total_rounds:
+            out = ''
+            for cli_ID in np.arange(self.min_available_clients):
+                out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n\n'
+            f = open(self.save_path + "/pool_output.out", "w")
+            f.write(out)
+            f.close()
+
         return loss, metrics
 
     def configure_fit(
@@ -223,9 +243,8 @@ class topology_based_Avg(Strategy):
             client_manager.num_available()
         )
         
-        #self.selected_pool = self.client_list.append(self.client_list.pop(0)) #pick first rotate list
-        self.selected_pool = self.client_list[0]
-        self.client_list = np.roll(self.client_list, -1, axis=1).tolist()
+        self.selected_pool = self.client_list[0] #pick first rotate list
+        self.client_list = np.roll(self.client_list, -1).tolist()
 
         connections = self.topology[self.selected_pool]
 
@@ -288,6 +307,8 @@ class topology_based_Avg(Strategy):
             config = self.on_evaluate_config_fn(server_round)
         pairs = []
         for client in clients:
+            #print(client.cid)
+            #print('EEEEE')
             #evaluate_ins = EvaluateIns(parameters, config)
             evaluate_ins = EvaluateIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, evaluate_ins))
