@@ -45,6 +45,7 @@ def prepare_dataset(num_clients: int, batch_size: int, val_ratio: float = 0.1):
     if (num_clients > 1):
         num_images = len(trainset) // num_clients
         partition_len = [num_images] * num_clients
+        partition_len[num_clients-1] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
         trainsets = random_split(
             trainset, partition_len, torch.Generator().manual_seed(2023)
         )

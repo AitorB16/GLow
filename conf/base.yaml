@@ -1,12 +1,13 @@
 run_name: 'R1'
-num_clients: 5
+num_clients: 6
 pools: #topology
-  p0: [1, 0, 4]
+  p0: [1, 0, 4, 3, 2, 5]
   p1: [0, 1, 2]
   p2: [1, 2, 3]
   p3: [2, 3, 4]
   p4: [0, 4, 3]
-num_rounds: 300
+  p5: []
+num_rounds: 10
 num_clients_per_round_fit: 3
 num_clients_per_round_eval: 3
 batch_size: 128

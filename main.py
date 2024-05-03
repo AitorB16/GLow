@@ -80,7 +80,7 @@ def main(cfg: DictConfig):
         server = server_pool[0],
         config=server_config_pool[0],
         strategy=strategy_pool[0],
-        client_resources={'num_cpus': 4, 'num_gpus': 0.2}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+        client_resources={'num_cpus': 4, 'num_gpus': 1.0/cfg.num_clients_per_round_fit}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
     #6. SAVE RESULTS
