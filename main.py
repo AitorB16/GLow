@@ -29,29 +29,32 @@ def main(cfg: DictConfig):
     #1. LOAD CONFIGURATION
     print(OmegaConf.to_yaml(cfg))
     save_path = HydraConfig.get().runtime.output_dir
-    
-    #2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader = prepare_dataset(cfg.num_clients, cfg.batch_size)
 
-    #3. DEFINE YOUR CLIENTS
-    vcid = np.arange(cfg.num_clients) #Client IDs
-    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes)
+    #LOAD TOPOLOGY
+    with open(cfg.topology, 'r') as file:
+        tplgy = yaml.safe_load(file)
 
-    #LOAD TOPOLOGY - EDGES
+    num_clients = tplgy['num_clients']
+    vcid = np.arange(num_clients) #Client IDs
+
     topology = []
     for cli_ID in vcid:
-        topology.append(cfg.pools['p'+str(cli_ID)])
-        #print(topology[cli_ID])
+        topology.append(tplgy['pools']['p'+str(cli_ID)])
+
+    
+    #2. PREAPRE YOUR DATASET
+    trainloaders, validationloaders, testloader = prepare_dataset(num_clients, cfg.batch_size, cfg.seed)
+
+    #3. DEFINE YOUR CLIENTS
+    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes)
 
 
     #4. DEFINE STRATEGY
     strategy = topology_based_Avg(
         topology=topology,
         fraction_fit=0.00001,
-        min_fit_clients=cfg.num_clients_per_round_fit,
         fraction_evaluate=0.00001,
-        min_evaluate_clients=cfg.num_clients_per_round_eval,
-        min_available_clients=cfg.num_clients,
+        min_available_clients=num_clients,
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
         fit_metrics_aggregation_fn = cli_val_distr,
@@ -60,6 +63,7 @@ def main(cfg: DictConfig):
         save_path = save_path
     )
 
+    ''' Not usable currently '''
     strategy_pool = []
     for cli_ID in vcid:
         strategy_pool.append(strategy)
@@ -75,12 +79,12 @@ def main(cfg: DictConfig):
  
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
-        num_clients=cfg.num_clients,
+        num_clients=num_clients,
         clients_ids = vcid,
         server = server_pool[0],
         config=server_config_pool[0],
         strategy=strategy_pool[0],
-        client_resources={'num_cpus': 4, 'num_gpus': 1.0/cfg.num_clients_per_round_fit}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+        client_resources={'num_cpus': 4, 'num_gpus': 1.0/tplgy['max_num_clients_per_round']}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
     #6. SAVE RESULTS

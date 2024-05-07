@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Federated Averaging (FedAvg) [McMahan et al., 2016] strategy.
+"""Topology based GL [Belenguer et al., 2024] strategy.
 
-Paper: arxiv.org/abs/1602.05629
+Paper: ###############
 """
 
 import flwr
@@ -101,8 +101,8 @@ class topology_based_Avg(Strategy):
         topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
-        min_fit_clients: int = 2,
-        min_evaluate_clients: int = 2,
+        min_fit_clients: int = 2, #Varible num subject to topology, not initialized here
+        min_evaluate_clients: int = 2, #Varible num subject to topology, not initialized here
         min_available_clients: int = 2,
         evaluate_fn: Optional[
             Callable[
@@ -159,11 +159,15 @@ class topology_based_Avg(Strategy):
     def num_fit_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Return the sample size and the required number of available clients."""
         num_clients = int(num_available_clients * self.fraction_fit)
+        '''Custom num clients depending on connection graph'''
+        self.min_fit_clients = len(self.topology[self.selected_pool])
         return max(num_clients, self.min_fit_clients), self.min_available_clients
 
     def num_evaluation_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
+        '''Custom num clients depending on connection graph'''
+        self.min_evaluate_clients = len(self.topology[self.selected_pool])
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
     
 
@@ -179,24 +183,13 @@ class topology_based_Avg(Strategy):
             self.pool_parameters = [None] * self.min_available_clients
 
             for client in clients:
-                #print(client.cid)
                 self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=None).parameters
-                #self.initial_parameters.append(client.get_parameters(ins=ins, timeout=90.0))
                 self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
-                #self.pool_parameters.append(self.initial_parameters[client.cid])
-
         
         initial_parameters = self.initial_parameters[0] #Params from first pool for initialization
         self.selected_pool = 0
         return initial_parameters
 
-
-    #def select_parameters(self, client_manager: ClientManager, cid: int) -> Optional[Parameters]:
-    #    """Initialize global model parameters."""
-    #    selected_parameters = self.pool_parameters[cid]
-    #    return selected_parameters
-
-    #log(INFO, "FL starting")
 
     def evaluate(
         self, server_round: int, parameters: Parameters
@@ -205,7 +198,6 @@ class topology_based_Avg(Strategy):
         if self.evaluate_fn is None:
             # No evaluation function provided
             return None
-        #parameters_ndarrays = parameters_to_ndarrays(parameters)
         parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
         eval_res = self.evaluate_fn(server_round, parameters_ndarrays, {})
         if eval_res is None:
@@ -215,11 +207,12 @@ class topology_based_Avg(Strategy):
         '''Track each pool metrics and results'''
         self.pool_losses[self.selected_pool] = loss
         self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+
         
         '''Save pool results in last rounds'''
         if server_round == self.total_rounds:
             out = ''
-            for cli_ID in np.arange(self.min_available_clients):
+            for cli_ID in range(self.min_available_clients):
                 out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n\n'
             f = open(self.save_path + "/pool_output.out", "w")
             f.write(out)
@@ -230,6 +223,10 @@ class topology_based_Avg(Strategy):
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, FitIns]]:
+        
+        self.selected_pool = self.client_list[0] #pick first rotate list
+        self.client_list = np.roll(self.client_list, -1).tolist()
+
 
         '''Implementing abstract class'''
         class select_criterion(Criterion):
@@ -242,15 +239,13 @@ class topology_based_Avg(Strategy):
         sample_size, min_num_clients = self.num_fit_clients(
             client_manager.num_available()
         )
-        
-        self.selected_pool = self.client_list[0] #pick first rotate list
-        self.client_list = np.roll(self.client_list, -1).tolist()
 
         connections = self.topology[self.selected_pool]
 
         clients = client_manager.sample(
             num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
         )
+
 
         """Configure the next round of training."""
         config = {}
@@ -259,9 +254,6 @@ class topology_based_Avg(Strategy):
             config = self.on_fit_config_fn(server_round)
         pairs = []
         for client in clients:
-            #print(client.cid)
-            #print('#######')
-            #fit_ins = FitIns(parameters, config)
             fit_ins = FitIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, fit_ins))
 
@@ -307,12 +299,8 @@ class topology_based_Avg(Strategy):
             config = self.on_evaluate_config_fn(server_round)
         pairs = []
         for client in clients:
-            #print(client.cid)
-            #print('EEEEE')
-            #evaluate_ins = EvaluateIns(parameters, config)
             evaluate_ins = EvaluateIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, evaluate_ins))
-
         # Return client/config pairs
         return pairs
     
@@ -375,7 +363,6 @@ class topology_based_Avg(Strategy):
                 for _, evaluate_res in results
             ]
         )
-
         # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.evaluate_metrics_aggregation_fn:

@@ -38,7 +38,7 @@ def get_cifar10(data_path: str = "../datasets"):
     return trainset, testset
 
 
-def prepare_dataset(num_clients: int, batch_size: int, val_ratio: float = 0.1):
+def prepare_dataset(num_clients: int, batch_size: int, seed, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
 
@@ -47,7 +47,7 @@ def prepare_dataset(num_clients: int, batch_size: int, val_ratio: float = 0.1):
         partition_len = [num_images] * num_clients
         partition_len[num_clients-1] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
         trainsets = random_split(
-            trainset, partition_len, torch.Generator().manual_seed(2023)
+            trainset, partition_len, torch.Generator().manual_seed(seed)
         )
 
         trainloaders = []
@@ -59,7 +59,7 @@ def prepare_dataset(num_clients: int, batch_size: int, val_ratio: float = 0.1):
             num_train = num_total - num_val
 
             for_train, for_val = random_split(
-                trainset_, [num_train, num_val], torch.Generator().manual_seed(2023)
+                trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
             )
             trainloaders.append(
                 DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
@@ -75,7 +75,7 @@ def prepare_dataset(num_clients: int, batch_size: int, val_ratio: float = 0.1):
         num_val = int(val_ratio * num_total)
         num_train = num_total - num_val
         for_train, for_val = random_split(
-            trainset, [num_train, num_val], torch.Generator().manual_seed(2023)
+            trainset, [num_train, num_val], torch.Generator().manual_seed(seed)
         )
         trainloaders = DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
         validationloaders = DataLoader(for_val, batch_size=batch_size, shuffle=True, num_workers=2)    

@@ -7,13 +7,15 @@ import flwr as fl
 from model import LeNet, train, test
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self, cid, trainloader, validationloader, num_classes, ):
+    def __init__(self, cid, trainloader, validationloader, num_classes ):
         super().__init__()
         
         self.cid = cid
 
         self.trainloader = trainloader
         self.validationloader = validationloader
+
+        self.local_acc = None
 
         self.model = LeNet()
 
@@ -42,12 +44,17 @@ class FlowerClient(fl.client.NumPyClient):
         
         #send how many training instances does a particular client have
         return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'energy used': '10W', 'distr_val_loss': '##'}
-    
+       
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         self.set_parameters(parameters)
         loss, accuracy = test(self.model, self.validationloader, self.device)
+        self.local_acc = accuracy
         return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
+    
+    def get_local_acc(self):
+        return self.local_acc
+    
     
 
 
@@ -76,14 +83,3 @@ def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List
 
     # Aggregate and return custom metric (weighted average)
     return {"acc_val_distr": acc, "cid": vcid}
-
-
-#def weighted_average(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, float]:
-#    # Multiply accuracy of each client by number of examples used
-#    accuracies = [num_examples * m["acc_distr"] for num_examples, m in metrics]
-#    examples = [num_examples for num_examples, _ in metrics]
-#
-#    # Aggregate and return custom metric (weighted average)
-#    return {"acc_distr_weighted": sum(accuracies) / sum(examples)}
-#
-
