@@ -1,6 +1,6 @@
 run_name: 'R3'
-topology: './conf/topologies/ring100+10.yaml'
-num_rounds: 1000
+topology: './conf/topologies/ring_chain100+10.yaml'
+num_rounds: 4000
 num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
