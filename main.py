@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
 
     
     #2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader = prepare_dataset(num_clients, cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloader = prepare_dataset(num_clients, tplgy['clients_with_no_data'], tplgy['last_connected_client'], cfg.batch_size, cfg.seed, )
 
     #3. DEFINE YOUR CLIENTS
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes)

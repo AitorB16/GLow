@@ -1,6 +1,6 @@
-run_name: 'R3'
-topology: './conf/topologies/ring_chain100+10.yaml'
-num_rounds: 4000
+run_name: 'R1'
+topology: './conf/topologies/chain30+5.yaml'
+num_rounds: 350
 num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
@@ -10,5 +10,5 @@ seed: 2001
 config_fit:
   lr: 0.0001
   momentum: 0.9
-  local_epochs: 2
+  local_epochs: 6
 

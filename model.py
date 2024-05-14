@@ -81,10 +81,6 @@ def train(net, trainloader, validationloader, optimizer, epochs, device: str):
         valid_loss += criterion(outputs, labels).item()
         correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
         total_size += labels.size(0)
-        #for i in range(len(outputs)):
-        #    if outputs[i] == labels[i]:
-        #        correct += 1
-        #    total_size += len(labels)
     val_accuracy = correct / total_size
     metrics_val_distributed_fit = val_accuracy
 
@@ -102,16 +98,8 @@ def test(net, testloader, device: str):
         for inputs, labels in testloader:
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = net(inputs)
-            #outputs = torch.argmax(outputs, dim=-1)
             loss += criterion(outputs, labels).item()
             correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
             total_size += labels.size(0)
-            #for i in range(len(outputs)):
-            #    if outputs[i].round() == labels[i]:
-            #        correct += 1
-            #total_size += len(labels)
-            #print(correct)
-            #print(total_size)
-            #print('##########')
         accuracy = correct / total_size
     return loss, accuracy

@@ -254,6 +254,7 @@ class topology_based_Avg(Strategy):
             config = self.on_fit_config_fn(server_round)
         pairs = []
         for client in clients:
+            #print(client.cid)
             fit_ins = FitIns(self.pool_parameters[self.selected_pool], config)
             pairs.append((client, fit_ins))
 

@@ -38,14 +38,23 @@ def get_cifar10(data_path: str = "../datasets"):
     return trainset, testset
 
 
-def prepare_dataset(num_clients: int, batch_size: int, seed, val_ratio: float = 0.1):
+def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conneceted_client: int, batch_size: int, seed, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
 
     if (num_clients > 1):
+
         num_images = len(trainset) // num_clients
         partition_len = [num_images] * num_clients
-        partition_len[num_clients-1] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
+        partition_len[last_conneceted_client] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
+        
+        ####TRICK### JUST GIVA AN INSTANCE TO 2 ISLANDS
+        for i in range(num_clients):
+            if i in clients_with_no_data:
+                partition_len[i] = 10
+        partition_len[last_conneceted_client] += num_images*len(clients_with_no_data) - 10*len(clients_with_no_data)
+        ##########
+
         trainsets = random_split(
             trainset, partition_len, torch.Generator().manual_seed(seed)
         )
