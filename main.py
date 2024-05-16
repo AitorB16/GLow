@@ -64,26 +64,29 @@ def main(cfg: DictConfig):
     )
 
     ''' Not usable currently '''
-    strategy_pool = []
-    for cli_ID in vcid:
-        strategy_pool.append(strategy)
+    #strategy_pool = []
+    #for cli_ID in vcid:
+    #    strategy_pool.append(strategy)
+    #
+    #server_config_pool = []
+    #for cli_ID in vcid:
+    #    server_config_pool.append(fl.server.ServerConfig(num_rounds=cfg.num_rounds))
+    #
+    #server_pool = []
+    #for cli_ID in vcid:
+    #    server_pool.append(fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy))
 
-    server_config_pool = []
-    for cli_ID in vcid:
-        server_config_pool.append(fl.server.ServerConfig(num_rounds=cfg.num_rounds))
+    server_config = fl.server.ServerConfig(num_rounds=cfg.num_rounds)
+    server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
 
-    server_pool = []
-    for cli_ID in vcid:
-        server_pool.append(fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy))
 
- 
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=num_clients,
         clients_ids = vcid,
-        server = server_pool[0],
-        config=server_config_pool[0],
-        strategy=strategy_pool[0],
+        server = server,
+        config=server_config,
+        strategy=strategy,
         client_resources={'num_cpus': 4, 'num_gpus': 1.0/tplgy['max_num_clients_per_round']}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 

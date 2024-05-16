@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 import pandas as pd
 
-from dataset import prepare_dataset
+from dataset import prepare_dataset_cnl
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,14 +31,14 @@ def main(cfg: DictConfig):
     # Load config params
     epochs = cfg.num_rounds
     lr = cfg.config_fit.lr
-    num_clients = 1
+    #num_clients = 1
     batch_size = cfg.batch_size
-    num_classes = cfg.num_classes
-    momentum = cfg.config_fit.momentum
+    #num_classes = cfg.num_classes
+    #momentum = cfg.config_fit.momentum
 
 
     #2. LOAD DATASET    
-    trainloader, validationloader, testloader = prepare_dataset(num_clients, batch_size)
+    trainloader, validationloader, testloader = prepare_dataset_cnl(batch_size=batch_size, seed=cfg.seed)
 
     #3. TRAINING
     device = "cuda" if torch.cuda.is_available() else "cpu"

@@ -38,56 +38,54 @@ def get_cifar10(data_path: str = "../datasets"):
     return trainset, testset
 
 
-def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conneceted_client: int, batch_size: int, seed, val_ratio: float = 0.1):
+def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conneceted_client: int, batch_size: int, seed: int, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
 
-    if (num_clients > 1):
-
-        num_images = len(trainset) // num_clients
-        partition_len = [num_images] * num_clients
-        partition_len[last_conneceted_client] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
-        
-        ####TRICK### JUST GIVA AN INSTANCE TO 2 ISLANDS
-        for i in range(num_clients):
-            if i in clients_with_no_data:
-                partition_len[i] = 10
-        partition_len[last_conneceted_client] += num_images*len(clients_with_no_data) - 10*len(clients_with_no_data)
-        ##########
-
-        trainsets = random_split(
-            trainset, partition_len, torch.Generator().manual_seed(seed)
-        )
-
-        trainloaders = []
-        validationloaders = []
-        
-        for trainset_ in trainsets:
-            num_total = len(trainset_)
-            num_val = int(val_ratio * num_total)
-            num_train = num_total - num_val
-
-            for_train, for_val = random_split(
-                trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
-            )
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
+    num_images = len(trainset) // num_clients
+    partition_len = [num_images] * num_clients
+    partition_len[last_conneceted_client] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
     
-    #centralized
-    else:
-        num_total = len(trainset)
+    #JUST GIVE 10 INSTANCES TO ISLANDS
+    for i in range(num_clients):
+        if i in clients_with_no_data:
+            partition_len[i] = 10
+    partition_len[last_conneceted_client] += num_images*len(clients_with_no_data) - 10*len(clients_with_no_data)
+    ##########
+    trainsets = random_split(
+        trainset, partition_len, torch.Generator().manual_seed(seed)
+    )
+    trainloaders = []
+    validationloaders = []
+    
+    for trainset_ in trainsets:
+        num_total = len(trainset_)
         num_val = int(val_ratio * num_total)
         num_train = num_total - num_val
         for_train, for_val = random_split(
-            trainset, [num_train, num_val], torch.Generator().manual_seed(seed)
+            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
         )
-        trainloaders = DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-        validationloaders = DataLoader(for_val, batch_size=batch_size, shuffle=True, num_workers=2)    
-        testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
-
+        trainloaders.append(
+            DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
+        )
+        validationloaders.append(
+            DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
+        )
+    testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
     return trainloaders, validationloaders, testloader
+
+
+def prepare_dataset_cnl(batch_size: int, seed: int, val_ratio: float = 0.1):
+    """Load CIFAR-10 (training and test set)."""
+    trainset, testset = get_cifar10()
+    num_total = len(trainset)
+    num_val = int(val_ratio * num_total)
+    num_train = num_total - num_val
+    for_train, for_val = random_split(
+        trainset, [num_train, num_val], torch.Generator().manual_seed(seed)
+    )
+    trainloaders = DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
+    validationloaders = DataLoader(for_val, batch_size=batch_size, shuffle=True, num_workers=2)    
+    testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
+    return trainloaders, validationloaders, testloader 
+

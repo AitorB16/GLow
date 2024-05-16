@@ -213,7 +213,7 @@ class topology_based_Avg(Strategy):
         if server_round == self.total_rounds:
             out = ''
             for cli_ID in range(self.min_available_clients):
-                out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n\n'
+                out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
             f = open(self.save_path + "/pool_output.out", "w")
             f.write(out)
             f.close()
