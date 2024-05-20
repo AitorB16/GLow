@@ -118,6 +118,7 @@ class topology_based_Avg(Strategy):
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         inplace: bool = True,
+        run_id: str,
         save_path: str
     ) -> None:
         super().__init__()
@@ -148,6 +149,7 @@ class topology_based_Avg(Strategy):
         self.inplace = inplace
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
+        self.run_id = run_id
         self.save_path = save_path
 
     def __repr__(self) -> str:
@@ -214,7 +216,7 @@ class topology_based_Avg(Strategy):
             out = ''
             for cli_ID in range(self.min_available_clients):
                 out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
-            f = open(self.save_path + "/pool_output.out", "w")
+            f = open(self.save_path + "/" + self.run_id + "_pool_output.out", "w")
             f.write(out)
             f.close()
 

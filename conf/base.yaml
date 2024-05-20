@@ -1,12 +1,12 @@
-run_name: 'B2'
-topology: './conf/topologies/fully_connected30+5.yaml'
-num_rounds: 350
+run_name: 'G30_5'
+#topology: './conf/topologies/fully_connected30+5.yaml'
+num_rounds: 175
 num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
 num_classes: 10 #output layer size
 balance_data: False
-seed: 2001
+seed: 1999
 config_fit:
   lr: 0.0001
   momentum: 0.9
