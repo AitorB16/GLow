@@ -1,4 +1,4 @@
-run_name: 'G30_5'
+run_name: 'graph_60_5'
 #topology: './conf/topologies/fully_connected30+5.yaml'
 num_rounds: 175
 num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
@@ -11,4 +11,3 @@ config_fit:
   lr: 0.0001
   momentum: 0.9
   local_epochs: 3
-

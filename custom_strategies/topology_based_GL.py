@@ -216,7 +216,7 @@ class topology_based_Avg(Strategy):
             out = ''
             for cli_ID in range(self.min_available_clients):
                 out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
-            f = open(self.save_path + "/" + self.run_id + "_pool_output.out", "w")
+            f = open(self.save_path + self.run_id + "_pool.out", "w")
             f.write(out)
             f.close()
 
