@@ -11,6 +11,7 @@ class FlowerClient(fl.client.NumPyClient):
         super().__init__()
         
         self.cid = cid
+        self.local_train = False
 
         self.trainloader = trainloader
         self.validationloader = validationloader
@@ -32,18 +33,20 @@ class FlowerClient(fl.client.NumPyClient):
     def fit(self, parameters, config):
         #copy params from server in local models
         self.set_parameters(parameters)
+        metrics_val_distr = None
 
-        lr = config['lr']
-        #momentum = config['momentum']
-        epochs = config['local_epochs']
-
-        optim = torch.optim.Adam(self.model.parameters(), lr=lr)
-
-        #local training
-        distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.device)
+        if config['local_train_cid'] == self.cid:
+            lr = config['lr']
+            #momentum = config['momentum']
+            epochs = config['local_epochs']
+            optim = torch.optim.Adam(self.model.parameters(), lr=lr)
+            #local training
+            distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.device)
+            self.local_train = False
+            #send how many training instances does a particular client have 
         
-        #send how many training instances does a particular client have
         return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'energy used': '10W', 'distr_val_loss': '##'}
+
        
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):

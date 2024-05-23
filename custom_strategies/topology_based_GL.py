@@ -248,16 +248,15 @@ class topology_based_Avg(Strategy):
             num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
         )
 
-
         """Configure the next round of training."""
         config = {}
         if self.on_fit_config_fn is not None:
             # Custom fit config function provided
             config = self.on_fit_config_fn(server_round)
+            config['local_train_cid'] = self.selected_pool
         pairs = []
         for client in clients:
-            #print(client.cid)
-            fit_ins = FitIns(self.pool_parameters[self.selected_pool], config)
+            fit_ins = FitIns(self.pool_parameters[client.cid], config)
             pairs.append((client, fit_ins))
 
         # Return client/config pairs
@@ -300,9 +299,10 @@ class topology_based_Avg(Strategy):
         if self.on_evaluate_config_fn is not None:
             # Custom fit config function provided
             config = self.on_evaluate_config_fn(server_round)
+            config['local_train_cid'] = self.selected_pool
         pairs = []
         for client in clients:
-            evaluate_ins = EvaluateIns(self.pool_parameters[self.selected_pool], config)
+            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
             pairs.append((client, evaluate_ins))
         # Return client/config pairs
         return pairs
