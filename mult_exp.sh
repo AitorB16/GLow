@@ -2,6 +2,7 @@
 for i in $(seq 0 $4);
 do
     sbatch exec.sbatch "$1" "$2" ""$i"_""$3" "./conf/topologies/"$3"/graph_"$i".yaml"
+    #sleep 5
     #bnd -exec python3  "$1" -m "./conf/topologies/graph_30_5/graph_"$i".yaml"
 done
 

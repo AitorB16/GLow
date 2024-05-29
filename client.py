@@ -38,7 +38,10 @@ class FlowerClient(fl.client.NumPyClient):
         if config['local_train_cid'] == self.cid:
             lr = config['lr']
             #momentum = config['momentum']
-            epochs = config['local_epochs']
+            if config['comm_round'] <= config['num_nodes']:
+                epochs = config['local_epochs'] #Make it converge faster *3 epochs
+            else:
+                epochs = config['local_epochs']
             optim = torch.optim.Adam(self.model.parameters(), lr=lr)
             #local training
             distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.device)

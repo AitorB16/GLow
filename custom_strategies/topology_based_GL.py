@@ -254,6 +254,8 @@ class topology_based_Avg(Strategy):
             # Custom fit config function provided
             config = self.on_fit_config_fn(server_round)
             config['local_train_cid'] = self.selected_pool
+            config['comm_round'] = server_round
+            config['num_nodes'] = self.min_available_clients
         pairs = []
         for client in clients:
             fit_ins = FitIns(self.pool_parameters[client.cid], config)
@@ -321,6 +323,12 @@ class topology_based_Avg(Strategy):
         if not self.accept_failures and failures:
             return None, {}
 
+        #Don't aggregate other pool mates in first rounds
+        if server_round <= self.min_available_clients:
+            for client, fit_res in results:
+                if client.cid != self.selected_pool:
+                    fit_res.num_examples = 0
+
         if self.inplace:
             # Does in-place weighted average of results
             aggregated_ndarrays = aggregate_inplace(results)
@@ -343,6 +351,9 @@ class topology_based_Avg(Strategy):
             log(WARNING, "No fit_metrics_aggregation_fn provided")
 
         self.pool_parameters[self.selected_pool] = parameters_aggregated
+
+
+        '''Spread knowledge to other clients'''
 
         return parameters_aggregated, metrics_aggregated
 
