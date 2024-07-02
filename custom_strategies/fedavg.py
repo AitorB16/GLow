@@ -12,15 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Topology based GL [Belenguer et al., 2024] strategy.
+"""Federated Averaging (FedAvg) [McMahan et al., 2016] strategy.
 
-Paper: ###############
+Paper: arxiv.org/abs/1602.05629
 """
 
-import flwr
-import numpy as np
 
-from logging import WARNING, INFO
+from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from flwr.common import (
@@ -42,11 +40,6 @@ from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
-from  flwr.server.criterion import Criterion
-
-from flwr.common.typing import GetParametersIns
-
-
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
 Setting `min_available_clients` lower than `min_fit_clients` or
 `min_evaluate_clients` can cause the server to fail when there are too few clients
@@ -56,7 +49,7 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 
 # pylint: disable=line-too-long
-class topology_based_Avg(Strategy):
+class FedAvg(Strategy):
     """Federated Averaging strategy.
 
     Implementation based on https://arxiv.org/abs/1602.05629
@@ -97,12 +90,10 @@ class topology_based_Avg(Strategy):
     def __init__(
         self,
         *,
-        total_rounds: int,
-        topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
-        min_fit_clients: int = 2, #Varible num subject to topology, not initialized here
-        min_evaluate_clients: int = 2, #Varible num subject to topology, not initialized here
+        min_fit_clients: int = 2,
+        min_evaluate_clients: int = 2,
         min_available_clients: int = 2,
         evaluate_fn: Optional[
             Callable[
@@ -113,14 +104,10 @@ class topology_based_Avg(Strategy):
         on_fit_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         on_evaluate_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         accept_failures: bool = True,
-        initial_parameters: Optional[List[Parameters]] = None,
-        pool_parameters: Optional[List[Parameters]] = None,
+        initial_parameters: Optional[Parameters] = None,
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
-        early_local_train: Optional[bool] = False,
         inplace: bool = True,
-        run_id: str,
-        save_path: str
     ) -> None:
         super().__init__()
 
@@ -130,70 +117,42 @@ class topology_based_Avg(Strategy):
         ):
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
-        self.total_rounds = total_rounds
-        self.topology = topology
         self.fraction_fit = fraction_fit
         self.fraction_evaluate = fraction_evaluate
         self.min_fit_clients = min_fit_clients
         self.min_evaluate_clients = min_evaluate_clients
         self.min_available_clients = min_available_clients
-        self.client_list = np.arange(min_available_clients)
         self.evaluate_fn = evaluate_fn
         self.on_fit_config_fn = on_fit_config_fn
         self.on_evaluate_config_fn = on_evaluate_config_fn
         self.accept_failures = accept_failures
         self.initial_parameters = initial_parameters
-        self.pool_parameters = pool_parameters
-        self.selected_pool = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.inplace = inplace
-        self.pool_metrics = [None] * self.min_available_clients
-        self.pool_losses = [None] * self.min_available_clients
-        self.run_id = run_id
-        self.save_path = save_path
-        self.early_local_train = early_local_train
 
     def __repr__(self) -> str:
         """Compute a string representation of the strategy."""
         rep = f"FedAvg(accept_failures={self.accept_failures})"
         return rep
 
-      
     def num_fit_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Return the sample size and the required number of available clients."""
         num_clients = int(num_available_clients * self.fraction_fit)
-        '''Custom num clients depending on connection graph'''
-        self.min_fit_clients = len(self.topology[self.selected_pool])
         return max(num_clients, self.min_fit_clients), self.min_available_clients
 
     def num_evaluation_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
-        '''Custom num clients depending on connection graph'''
-        self.min_evaluate_clients = len(self.topology[self.selected_pool])
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
-    
 
     def initialize_parameters(
         self, client_manager: ClientManager
     ) -> Optional[Parameters]:
         """Initialize global model parameters."""
-        clients = client_manager.sample(self.min_available_clients) #Sample all clients
-        ins = GetParametersIns(config={})
-        
-        if self.initial_parameters is None:
-            self.initial_parameters = [None] * self.min_available_clients
-            self.pool_parameters = [None] * self.min_available_clients
-
-            for client in clients:
-                self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=None).parameters
-                self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
-        
-        initial_parameters = self.initial_parameters[0] #Params from first pool for initialization
-        self.selected_pool = 0
+        initial_parameters = self.initial_parameters
+        self.initial_parameters = None  # Don't keep initial parameters in memory
         return initial_parameters
-
 
     def evaluate(
         self, server_round: int, parameters: Parameters
@@ -202,115 +161,63 @@ class topology_based_Avg(Strategy):
         if self.evaluate_fn is None:
             # No evaluation function provided
             return None
-        parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
+        parameters_ndarrays = parameters_to_ndarrays(parameters)
         eval_res = self.evaluate_fn(server_round, parameters_ndarrays, {})
         if eval_res is None:
             return None
         loss, metrics = eval_res
-
-        '''Track each pool metrics and results'''
-        self.pool_losses[self.selected_pool] = loss
-        self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
-
-        
-        '''Save pool results in last rounds'''
-        if server_round == self.total_rounds:
-            out = ''
-            for cli_ID in range(self.min_available_clients):
-                out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
-            f = open(self.save_path + self.run_id + "_pool.out", "w")
-            f.write(out)
-            f.close()
-
         return loss, metrics
 
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, FitIns]]:
-        
-        self.selected_pool = self.client_list[0] #pick first rotate list
-        self.client_list = np.roll(self.client_list, -1).tolist()
-
-
-        '''Implementing abstract class'''
-        class select_criterion(Criterion):
-            def __init__(self, cid_list):
-                self.cid_list = cid_list
-            def select(self, client: ClientProxy) -> bool:
-                return client.cid in self.cid_list
-
-        # Sample clients
-        sample_size, min_num_clients = self.num_fit_clients(
-            client_manager.num_available()
-        )
-
-        connections = self.topology[self.selected_pool]
-
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
-        )
-
         """Configure the next round of training."""
         config = {}
         if self.on_fit_config_fn is not None:
             # Custom fit config function provided
             config = self.on_fit_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
+            config['local_train_cid'] = -1
             config['comm_round'] = server_round
             config['num_nodes'] = self.min_available_clients
-        pairs = []
-        for client in clients:
-            fit_ins = FitIns(self.pool_parameters[client.cid], config)
-            pairs.append((client, fit_ins))
-
-        # Return client/config pairs
-        return pairs
-
-    def configure_evaluate(
-        self, server_round: int, parameters: Parameters, client_manager: ClientManager
-    ) -> List[Tuple[ClientProxy, EvaluateIns]]:
-        
-        '''Implementing abstract class'''
-        class select_criterion(Criterion):
-            def __init__(self, cid_list):
-                self.cid_list = cid_list
-            def select(self, client: ClientProxy) -> bool:
-                return client.cid in self.cid_list     
-
-        """Configure the next round of evaluation."""
-        # Do not configure federated evaluation if fraction eval is 0.
-        if self.fraction_evaluate == 0.0:
-            return []
-
-        # Sample clients
-        sample_size, min_num_clients = self.num_evaluation_clients(
-            client_manager.num_available()
-        )
+        fit_ins = FitIns(parameters, config)
 
         # Sample clients
         sample_size, min_num_clients = self.num_fit_clients(
             client_manager.num_available()
         )
-        
-        connections = self.topology[self.selected_pool]
-
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
+            num_clients=sample_size, min_num_clients=min_num_clients
         )
+
+        # Return client/config pairs
+        return [(client, fit_ins) for client in clients]
+
+    def configure_evaluate(
+        self, server_round: int, parameters: Parameters, client_manager: ClientManager
+    ) -> List[Tuple[ClientProxy, EvaluateIns]]:
+        """Configure the next round of evaluation."""
+        # Do not configure federated evaluation if fraction eval is 0.
+        if self.fraction_evaluate == 0.0:
+            return []
 
         # Parameters and config
         config = {}
         if self.on_evaluate_config_fn is not None:
-            # Custom fit config function provided
+            # Custom evaluation config function provided
             config = self.on_evaluate_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
-        pairs = []
-        for client in clients:
-            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
-            pairs.append((client, evaluate_ins))
+            config['local_train_cid'] = -1
+        evaluate_ins = EvaluateIns(parameters, config)
+
+        # Sample clients
+        sample_size, min_num_clients = self.num_evaluation_clients(
+            client_manager.num_available()
+        )
+        clients = client_manager.sample(
+            num_clients=sample_size, min_num_clients=min_num_clients
+        )
+
         # Return client/config pairs
-        return pairs
-    
+        return [(client, evaluate_ins) for client in clients]
 
     def aggregate_fit(
         self,
@@ -324,12 +231,6 @@ class topology_based_Avg(Strategy):
         # Do not aggregate if there are failures and failures are not accepted
         if not self.accept_failures and failures:
             return None, {}
-
-        #Don't aggregate other pool mates in first rounds
-        if self.early_local_train and server_round <= self.min_available_clients:
-            for client, fit_res in results:
-                if client.cid != self.selected_pool:
-                    fit_res.num_examples = 0
 
         if self.inplace:
             # Does in-place weighted average of results
@@ -351,11 +252,6 @@ class topology_based_Avg(Strategy):
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No fit_metrics_aggregation_fn provided")
-
-        self.pool_parameters[self.selected_pool] = parameters_aggregated
-
-
-        '''Spread knowledge to other clients'''
 
         return parameters_aggregated, metrics_aggregated
 
@@ -379,6 +275,7 @@ class topology_based_Avg(Strategy):
                 for _, evaluate_res in results
             ]
         )
+
         # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.evaluate_metrics_aggregation_fn:

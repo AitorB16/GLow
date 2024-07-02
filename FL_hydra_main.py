@@ -22,7 +22,7 @@ from flwr.client import ClientFn
 from flwr.server.client_manager import ClientManager, SimpleClientManager
 
 
-from custom_strategies.topology_based_GL import topology_based_Avg
+from custom_strategies.fedavg import FedAvg
 
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
@@ -40,10 +40,6 @@ def main(cfg: DictConfig):
     num_clients = tplgy['num_clients']
     vcid = np.arange(num_clients) #Client IDs
 
-    topology = []
-    for cli_ID in vcid:
-        topology.append(tplgy['pools']['p'+str(cli_ID)])
-
     
     #2. PREAPRE YOUR DATASET
     trainloaders, validationloaders, testloader = prepare_dataset(num_clients, tplgy['clients_with_no_data'], tplgy['last_connected_client'], cfg.batch_size, cfg.seed, )
@@ -52,21 +48,23 @@ def main(cfg: DictConfig):
     #3. DEFINE YOUR CLIENTS
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, device)
 
+    cli_per_round = round(num_clients / 4)
+
 
     #4. DEFINE STRATEGY
-    strategy = topology_based_Avg(
-        topology=topology,
+    strategy = FedAvg(
         fraction_fit=0.00001,
         fraction_evaluate=0.00001,
+        min_fit_clients = cli_per_round,
+        min_evaluate_clients = cli_per_round,
         min_available_clients=num_clients,
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
         fit_metrics_aggregation_fn = cli_val_distr,
         evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
-        total_rounds = cfg.num_rounds,
-        run_id = run_id,
-        early_local_train = cfg.early_local_train,
-        save_path = save_path
+        #total_rounds = cfg.num_rounds,
+        #run_id = run_id,
+        #save_path = save_path
     )
 
     ''' Not usable currently '''
@@ -87,7 +85,7 @@ def main(cfg: DictConfig):
 
 
     if device == 'GPU':
-        num_gpus = 1.0/tplgy['max_num_clients_per_round']
+        num_gpus = 1.0/cli_per_round
     else:
         num_gpus = 0.
 

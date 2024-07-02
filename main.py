@@ -1,4 +1,5 @@
 import sys
+import time
 import flwr as fl
 import pickle
 from pathlib import Path
@@ -25,6 +26,8 @@ def main():
     #1. LOAD CONFIGURATION
 
     #LOAD TOPOLOGY
+    start_time = time.time()
+
     conf_file = sys.argv[1]
     run_id = sys.argv[2]
     tplgy_file = sys.argv[3]
@@ -49,8 +52,10 @@ def main():
     #2. PREAPRE YOUR DATASET
     trainloaders, validationloaders, testloader = prepare_dataset(num_clients, tplgy['clients_with_no_data'], tplgy['last_connected_client'], cfg['batch_size'], cfg['seed'] )
 
+    
+    device = cfg['device']
     #3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg['num_classes'])
+    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg['num_classes'], device)
 
 
     #4. DEFINE STRATEGY
@@ -65,12 +70,17 @@ def main():
         evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
         total_rounds = cfg['num_rounds'],
         run_id = run_id,
+        early_local_train = cfg['early_local_train'],
         save_path = save_path
     )
 
     server_config = fl.server.ServerConfig(num_rounds=cfg['num_rounds'])
     server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
 
+    if device == 'GPU':
+        num_gpus = 1.0/tplgy['max_num_clients_per_round']
+    else:
+        num_gpus = 0.
 
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
@@ -79,7 +89,7 @@ def main():
         server = server,
         config=server_config,
         strategy=strategy,
-        client_resources={'num_cpus': 4, 'num_gpus': 1.0/tplgy['max_num_clients_per_round']}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+        client_resources={'num_cpus': 4, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
     #6. SAVE RESULTS
@@ -104,8 +114,9 @@ def main():
     out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out2 = out1 + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
     out3 = out2 + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
+    out4 = out3 + '\n\n**Exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + run_id + "_raw.out", "w")
-    f.write(out3)
+    f.write(out4)
     f.close()
 
 if __name__ == "__main__":
