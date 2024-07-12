@@ -86,7 +86,7 @@ def main(cfg: DictConfig):
     server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
 
 
-    if device == 'GPU':
+    if device == 'GPU' or device == 'H100':
         num_gpus = 1.0/tplgy['max_num_clients_per_round']
     else:
         num_gpus = 0.
@@ -121,12 +121,21 @@ def main(cfg: DictConfig):
     print('#################')
     print(str(history.metrics_centralized))
     #print("--- %s seconds ---" % (time.time() - start_time))
-    out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
-    out2 = out1 + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out3 = out2 + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
-    out4 = out3 + '\n\n**Exec_time_secs: ' + str(time.time() - start_time)
+    out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
+    out2 = out1 + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
+    out3 = out2 + '\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
+    out4 = out3 + '\n**Exec_time_secs: ' + str(time.time() - start_time)
+
     f = open(save_path + "/raw.out", "w")
     f.write(out4)
+    f.close()
+
+    acc_distr = ''
+    for i in range(cfg.num_rounds):
+        acc_distr = acc_distr + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr'][i][1]])+'\n'
+
+    f = open(save_path + "/acc_distr.out", "w")
+    f.write(acc_distr)
     f.close()
 
 if __name__ == "__main__":

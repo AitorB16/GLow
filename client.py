@@ -19,7 +19,7 @@ class FlowerClient(fl.client.NumPyClient):
 
         self.model = LeNet()
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() and device == 'GPU' else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() and (device == 'GPU' or device == 'H100') else "cpu")
 
     def set_parameters(self, parameters):
         params_dict = zip(self.model.state_dict().keys(), parameters)

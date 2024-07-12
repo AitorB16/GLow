@@ -1,8 +1,8 @@
-run_name: '10'
-topology: './conf/topologies/graph_16_32/graph_0.yaml'
-device: GPU
+run_name: '0'
+topology: './conf/topologies/graph_8_2/graph_2.yaml'
+device: H100
 early_local_train: False
-num_rounds: 512
+num_rounds: 2
 num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128

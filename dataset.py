@@ -50,7 +50,18 @@ def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conn
     for i in range(num_clients):
         if i in clients_with_no_data:
             partition_len[i] = 10
-    partition_len[last_conneceted_client] += num_images*len(clients_with_no_data) - 10*len(clients_with_no_data)
+    
+    to_share = num_images*len(clients_with_no_data) - 10*len(clients_with_no_data)
+    add_to_cli = to_share // (num_clients-len(clients_with_no_data))
+    remainder = to_share % (num_clients-len(clients_with_no_data))
+
+   #JUST GIVE 10 INSTANCES TO ISLANDS
+    for i in range(num_clients):
+        if i not in clients_with_no_data:
+            partition_len[i] += add_to_cli
+
+    partition_len[last_conneceted_client] += remainder 
+    
     ##########
     trainsets = random_split(
         trainset, partition_len, torch.Generator().manual_seed(seed)
