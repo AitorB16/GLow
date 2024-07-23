@@ -1,3 +1,4 @@
+#sleep 3600
 #!/bin/bash
 for i in $(seq 0 $4);
 do
@@ -7,4 +8,4 @@ do
 done
 
 #ARGVS: 1st exec name // 2nd conf_file // 3rd run_ID // 4th num experiments
-#./mult_exp.sh main.py conf/topologies/graph30_5/base.yaml graph_30_5 15
+#./mult_exp.sh main.py conf/topologies/graph_8_2/base.yaml graph_8_2 4
