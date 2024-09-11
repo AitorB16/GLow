@@ -331,6 +331,7 @@ class topology_based_Avg(Strategy):
                 if client.cid != self.selected_pool:
                     fit_res.num_examples = 0
 
+        '''Detect if results are 0'''
         if self.inplace:
             # Does in-place weighted average of results
             aggregated_ndarrays = aggregate_inplace(results)
@@ -356,6 +357,8 @@ class topology_based_Avg(Strategy):
 
 
         '''Spread knowledge to other clients'''
+        #No tiene sentido actualizar el pool parameter de los vecinos con el average del local y el modelo local...
+
 
         return parameters_aggregated, metrics_aggregated
 

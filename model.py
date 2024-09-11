@@ -52,6 +52,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, device: str):
 
     This is a fairly simple training loop for PyTorch.
     """
+    num_classes = 10
     # TRAIN
     criterion = nn.CrossEntropyLoss()
     net.train()
@@ -67,7 +68,10 @@ def train(net, trainloader, validationloader, optimizer, epochs, device: str):
             optimizer.zero_grad()
             loss_sum += loss.item()
         #print(f"\n** {_+1}/{epochs} mean loss: {loss_sum/len(trainloader)}\n")
-        train_loss.append(loss_sum/len(trainloader))
+        if len(trainloader) > 0:
+            train_loss.append(loss_sum/len(trainloader))
+        else:
+            train_loss.append(1./num_classes)
 
     # VALIDATION
     correct, total_size, valid_loss = 0, 0, 0.0
@@ -81,7 +85,10 @@ def train(net, trainloader, validationloader, optimizer, epochs, device: str):
         valid_loss += criterion(outputs, labels).item()
         correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
         total_size += labels.size(0)
-    val_accuracy = correct / total_size
+    if total_size > 0:
+        val_accuracy = correct / total_size
+    else:
+        val_accuracy = 1./num_classes
     metrics_val_distributed_fit = val_accuracy
 
     return train_loss, metrics_val_distributed_fit
@@ -92,6 +99,7 @@ def test(net, testloader, device: str):
     """
     criterion = nn.CrossEntropyLoss()
     correct, total_size, loss = 0, 0, 0.
+    num_classes = 10
     net.eval()
     net.to(device)
     with torch.no_grad():
@@ -101,5 +109,8 @@ def test(net, testloader, device: str):
             loss += criterion(outputs, labels).item()
             correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
             total_size += labels.size(0)
-        accuracy = correct / total_size
+        if total_size > 0:
+            accuracy = correct / total_size
+        else:
+            accuracy = 1./num_classes
     return loss, accuracy
