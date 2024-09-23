@@ -32,7 +32,8 @@ class LeNet(nn.Module):
       self.conv2 = nn.Conv2d(16, 32, 3, 1, padding=1) # We double the feature maps for every conv layer as in pratice it is really good.
       self.conv3 = nn.Conv2d(32, 64, 3, 1, padding=1)
       self.fc1 = nn.Linear(4*4*64, 500) # I/p image size is 32*32, after 3 MaxPooling layers it reduces to 4*4 and 64 because our last conv layer has 64 outputs. Output nodes is 500
-      self.dropout1 = nn.Dropout(0.5)
+      #self.dropout1 = nn.Dropout(0.5)
+      self.dropout1 = nn.Dropout(0.2)
       self.fc2 = nn.Linear(500, 10) # output nodes are 10 because our dataset have 10 different categories
     def forward(self, x):
       x = F.relu(self.conv1(x)) #Apply relu to each output of conv layer.

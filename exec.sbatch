@@ -14,7 +14,7 @@
 #SBATCH --mem-per-cpu=8G
 
 #SBATCH --partition=GPU
-#SBATCH --gpus=1
+#SBATCH --gpus=0
 
 #SBATCH --array=1-1 #1 job to 1 GPU
 
