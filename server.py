@@ -5,6 +5,7 @@ import torch
 
 def get_on_fit_config(config):
     def fit_config_fn(server_round: int):
+        '''Decrease the learning rate from a specific communication round on'''
         #if server_round > 50:
         #    lr = config['lr'] / 10
         #else:

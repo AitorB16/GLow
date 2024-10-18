@@ -1,0 +1,13 @@
+run_name: 'graph_16_2'
+device: GPU
+#topology: './conf/topologies/fully_connected30+5.yaml'
+early_local_train: False
+num_rounds: 2048
+batch_size: 128
+num_classes: 10 #output layer size
+balance_data: False
+seed: 1999
+config_fit:
+  lr: 0.0001
+  momentum: 0.9
+  local_epochs: 2

@@ -11,7 +11,7 @@ import torchvision.datasets as torch_datasets
 #import ssl
 
 
-def get_cifar10(data_path: str = "../datasets"):
+def get_cifar10(data_path: str = "..datasets"):
     """Downlaod MNIST and apply a simple transform."""
     #ssl._create_default_https_context = ssl._create_unverified_context
     torch_datasets.CIFAR10.url="http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
@@ -46,7 +46,7 @@ def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conn
     partition_len = [num_images] * num_clients
     partition_len[last_conneceted_client] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
     
-    #JUST GIVE 0 INSTANCES TO ISLANDS
+    # JUST GIVE 0 INSTANCES TO ISLANDS
     for i in range(num_clients):
         if i in clients_with_no_data:
             partition_len[i] = 0
@@ -55,14 +55,14 @@ def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conn
     add_to_cli = to_share // (num_clients-len(clients_with_no_data))
     remainder = to_share % (num_clients-len(clients_with_no_data))
 
-   #JUST GIVE 0 INSTANCES TO ISLANDS
+   # JUST GIVE 0 INSTANCES TO ISLANDS
     for i in range(num_clients):
         if i not in clients_with_no_data:
             partition_len[i] += add_to_cli
 
     partition_len[last_conneceted_client] += remainder 
     
-    ##########
+    # TRAIN AND VALIDATION PARTITIONS PER AGENT
     trainsets = random_split(
         trainset, partition_len, torch.Generator().manual_seed(seed)
     )
@@ -86,6 +86,8 @@ def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conn
         else:
             trainloaders.append('')
             validationloaders.append('')
+
+    # SINGLE TESTSET PARTITION -- EACH AGENTS MODEL IS TESTED AGAINST THE SAME PARTITION           
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
     return trainloaders, validationloaders, testloader
 

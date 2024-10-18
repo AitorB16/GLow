@@ -3,6 +3,15 @@ logs
 outputs
 cpy_main.py
 __pycache__
-topologies
+conf/topologies/graph_8_4/
+conf/topologies/graph_8_8/
+conf/topologies/graph_8_16/
+conf/topologies/graph_8_32/
+conf/topologies/others/
+conf/topologies/graph_16_4/
+conf/topologies/graph_16_8/
+conf/topologies/graph_16_16/
+conf/topologies/graph_16_32/
 plots
 shonky
+sing_exp.sh

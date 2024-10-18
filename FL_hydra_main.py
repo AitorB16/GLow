@@ -61,13 +61,10 @@ def main(cfg: DictConfig):
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
         fit_metrics_aggregation_fn = cli_val_distr,
-        evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
-        #total_rounds = cfg.num_rounds,
-        #run_id = run_id,
-        #save_path = save_path
+        evaluate_metrics_aggregation_fn = cli_eval_distr_results,
     )
 
-    ''' Not usable currently '''
+    ''' Not usable currently -- change strategy or server conf during execution'''
     #strategy_pool = []
     #for cli_ID in vcid:
     #    strategy_pool.append(strategy)
@@ -83,7 +80,7 @@ def main(cfg: DictConfig):
     server_config = fl.server.ServerConfig(num_rounds=cfg.num_rounds)
     server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
 
-
+    # Divide GPU resources among agents
     if device == 'GPU':
         num_gpus = 1.0/cli_per_round
     else:
@@ -101,9 +98,7 @@ def main(cfg: DictConfig):
 
     #6. SAVE RESULTS
     results_path = Path(save_path) / "results.pkl"
-
-    results = {"history": history, "anythingelse": "here"}
-    
+    results = {"history": history, "anythingelse": "here"}    
     with open(str(results_path), "wb") as h:
         pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -119,12 +114,12 @@ def main(cfg: DictConfig):
     print('#################')
     print(str(history.metrics_centralized))
     #print("--- %s seconds ---" % (time.time() - start_time))
-    out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
-    out2 = out1 + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out3 = out2 + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
-    out4 = out3 + '\n\n**Exec_time_secs: ' + str(time.time() - start_time)
+    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
+    out = out + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
+    out = out + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
+    out = out + '\n\n**Exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + "/raw.out", "w")
-    f.write(out4)
+    f.write(out)
     f.close()
 
 if __name__ == "__main__":

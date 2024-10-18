@@ -50,6 +50,7 @@ def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
     # Count total examples
     num_examples_total = sum(fit_res.num_examples for (_, fit_res) in results)
     
+    #DETECT IF IS GREATER THAN 0 (i.e., NODE HAS LOCAL INSTANCES) AVOID DIVISION BY 0
     if num_examples_total > 0:
     # Compute scaling factors for each result
         scaling_factors = [

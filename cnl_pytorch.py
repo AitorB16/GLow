@@ -31,10 +31,7 @@ def main(cfg: DictConfig):
     # Load config params
     epochs = cfg.num_rounds
     lr = cfg.config_fit.lr
-    #num_clients = 1
     batch_size = cfg.batch_size
-    #num_classes = cfg.num_classes
-    #momentum = cfg.config_fit.momentum
 
 
     #2. LOAD DATASET    
@@ -47,20 +44,15 @@ def main(cfg: DictConfig):
     #model = Net(num_classes).to(device)
     model = LeNet().to(device)
 
-    #model.apply(init_normal)
-
     optim = torch.optim.Adam(model.parameters(), lr=lr)
-    #optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
     #from tqdm import tqdm
-
     train_loss, metrics_val_distributed_fit = train(model, trainloader, validationloader, optim, epochs, device)
     
     #4. VALIDATION
     history = []
 
     #5. EVALUATION
-
     loss, accuracy = test(model, testloader, device)
 
  
@@ -70,14 +62,10 @@ def main(cfg: DictConfig):
     with open(str(results_path), "wb") as h:
         pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
 
-    #out = {'Accuracy': [accuracy], 'Training_Loss': train_loss}
     out = "**accuracy: " + str(accuracy) + "\n**training_loss: " + ' '.join([str(elem) for elem in train_loss]) + '\n'
     f = open(save_path + "/output.out", "w")
     f.write(out)
     f.close()
-    
-    #out = "\n** Accuracy: " + str(accuracy) + "\n**Training Loss: " + ' '.join([str(elem) for elem in train_loss]) + '\n'
-    #logging.info(out) 
 
 if __name__ == "__main__":
     main()

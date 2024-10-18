@@ -14,11 +14,17 @@
 # ==============================================================================
 """Topology based GL [Belenguer et al., 2024] strategy.
 
-Paper: ###############
+Manuscript: ###############
 """
 
+import os
 import flwr
 import numpy as np
+from collections import OrderedDict
+import torch
+from model import LeNet
+
+
 
 from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -63,6 +69,10 @@ class topology_based_Avg(Strategy):
 
     Parameters
     ----------
+    total_rounds: int
+        Total number of communication rounds for the whole system
+    topology: List[List[int]]
+        List containing all the node heads with their corresponding list of neighbor nodes
     fraction_fit : float, optional
         Fraction of clients used during training. In case `min_fit_clients`
         is larger than `fraction_fit * available_clients`, `min_fit_clients`
@@ -85,12 +95,22 @@ class topology_based_Avg(Strategy):
         Function used to configure validation. Defaults to None.
     accept_failures : bool, optional
         Whether or not accept rounds containing failures. Defaults to True.
-    initial_parameters : Parameters, optional
-        Initial global model parameters.
+    initial_parameters : List of Parameters, optional
+        List of initial model parameters per head.
+    pool_parameters: List of Parameters, optional
+        List of model parameters per head, updated during the training.
     fit_metrics_aggregation_fn : Optional[MetricsAggregationFn]
         Metrics aggregation function, optional.
     evaluate_metrics_aggregation_fn : Optional[MetricsAggregationFn]
         Metrics aggregation function, optional.
+    early_local_train: bool, optional
+        SL for a fixed number of local rounds before starting communicating with other neighbors
+    inplace: bool. Defaults to True
+        Does in-place weighted average of results
+    run_id: str
+        Run name
+    save_path: str
+        Path to save achieved results
     """
 
     # pylint: disable=too-many-arguments,too-many-instance-attributes, line-too-long
@@ -101,8 +121,8 @@ class topology_based_Avg(Strategy):
         topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
-        min_fit_clients: int = 2, #Varible num subject to topology, not initialized here
-        min_evaluate_clients: int = 2, #Varible num subject to topology, not initialized here
+        min_fit_clients: int = 2, #Varible num subject to topology, (default value) not initialized here
+        min_evaluate_clients: int = 2, #Varible num subject to topology, (default value) not initialized here
         min_available_clients: int = 2,
         evaluate_fn: Optional[
             Callable[
@@ -194,6 +214,25 @@ class topology_based_Avg(Strategy):
         self.selected_pool = 0
         return initial_parameters
 
+    def save_results(self):
+        out = ''
+        for cli_ID in range(self.min_available_clients):
+            out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
+        f = open(self.save_path + self.run_id + "_pool.out", "w")
+        f.write(out)
+        f.close()
+        # save parameters
+        param_path = self.save_path + 'parameters/'
+        os.makedirs(param_path)
+        for cli_ID in range(self.min_available_clients):
+            net = LeNet()
+            cli_params_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
+            # Convert `List[np.ndarray]` to PyTorch`state_dict`
+            params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
+            state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+            net.load_state_dict(state_dict, strict=True)
+            # Save the model
+            torch.save(net.state_dict(), param_path + str(cli_ID) + '.pth')
 
     def evaluate(
         self, server_round: int, parameters: Parameters
@@ -208,19 +247,15 @@ class topology_based_Avg(Strategy):
             return None
         loss, metrics = eval_res
 
-        '''Track each pool metrics and results'''
+        # Track each pool metrics and results
         self.pool_losses[self.selected_pool] = loss
         self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
 
         
-        '''Save pool results in last rounds'''
+        # Save pool results and parameters in last rounds
         if server_round == self.total_rounds:
-            out = ''
-            for cli_ID in range(self.min_available_clients):
-                out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
-            f = open(self.save_path + self.run_id + "_pool.out", "w")
-            f.write(out)
-            f.close()
+            self.save_results()
+
 
         return loss, metrics
 
@@ -331,18 +366,18 @@ class topology_based_Avg(Strategy):
                 if client.cid != self.selected_pool:
                     fit_res.num_examples = 0
 
-        '''Detect if results are 0'''
         if self.inplace:
             # Does in-place weighted average of results
+            '''Detect if results are 0'''
             aggregated_ndarrays = aggregate_inplace(results)
         else:
-            # Convert results
+            # Does weighted average of results
             weights_results = [
                 (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
                 for _, fit_res in results
             ]
             aggregated_ndarrays = aggregate(weights_results)
-
+        
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
 
         # Aggregate custom metrics if aggregation fn was provided
@@ -357,8 +392,7 @@ class topology_based_Avg(Strategy):
 
 
         '''Spread knowledge to other clients'''
-        #No tiene sentido actualizar el pool parameter de los vecinos con el average del local y el modelo local...
-
+        #No point updating local network parameter of the neighbors with the local average and model
 
         return parameters_aggregated, metrics_aggregated
 

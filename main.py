@@ -18,14 +18,11 @@ from server import get_on_fit_config, get_evaluate_fn
 from flwr.client import ClientFn
 from flwr.server.client_manager import ClientManager, SimpleClientManager
 
-
 from custom_strategies.topology_based_GL import topology_based_Avg
 
 
 def main():
-    #1. LOAD CONFIGURATION
-
-    #LOAD TOPOLOGY
+    # 1. LOAD CONFIGURATION AND TOPOLOGY
     start_time = time.time()
 
     conf_file = sys.argv[1]
@@ -49,16 +46,16 @@ def main():
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     
-    #2. PREAPRE YOUR DATASET
+    # 2. PREAPRE YOUR DATASET
     trainloaders, validationloaders, testloader = prepare_dataset(num_clients, tplgy['clients_with_no_data'], tplgy['last_connected_client'], cfg['batch_size'], cfg['seed'] )
-
     
     device = cfg['device']
-    #3. DEFINE YOUR CLIENTS
+
+    # 3. DEFINE YOUR CLIENTS
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg['num_classes'], device)
 
 
-    #4. DEFINE STRATEGY
+    # 4. DEFINE A STRATEGY
     strategy = topology_based_Avg(
         topology=topology,
         fraction_fit=0.00001,
@@ -77,11 +74,14 @@ def main():
     server_config = fl.server.ServerConfig(num_rounds=cfg['num_rounds'])
     server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
 
+    # Divide GPU resources among agents (very high level)
     if device == 'GPU' or device == 'H100':
         num_gpus = 1.0/tplgy['max_num_clients_per_round']
     else:
         num_gpus = 0.
 
+
+    # 5. RUN SIMULATIONS
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=num_clients,
@@ -92,15 +92,12 @@ def main():
         client_resources={'num_cpus': 4, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
-    #6. SAVE RESULTS
-    results_path = save_path + run_id + "_results.pkl"
-
-    results = {"history": history, "anythingelse": "here"}
+    # 6. SAVE RESULTS
+    #results_path = save_path + run_id + "_results.pkl"
+    #results = {"history": history, "anythingelse": "here"} 
+    #with open(str(results_path), "wb") as h:
+    #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
     
-    with open(str(results_path), "wb") as h:
-        pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
-
-   
     print('#################')
     print(str(history.losses_distributed))
     print('#################')
@@ -111,18 +108,16 @@ def main():
     print(str(history.metrics_distributed))
     print('#################')
     print(str(history.metrics_centralized))
-    out1 = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
-    out2 = out1 + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out3 = out2 + '\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'    
-    out4 = out3 + '\n**Exec_time_secs: ' + str(time.time() - start_time)
+    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
+    out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
+    out = out + '\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']])   
+    out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + run_id + "_raw.out", "w")
-    f.write(out4)
+    f.write(out)
     f.close()
-
     acc_distr = ''
     for i in range(cfg['num_rounds']):
         acc_distr = acc_distr + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr'][i][1]])+'\n'
-
     f = open(save_path + run_id + "_acc_distr.out", "w")
     f.write(acc_distr)
     f.close()
