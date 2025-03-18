@@ -14,7 +14,7 @@ class Net(nn.Module):
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
+        self.fc3 = nn.Linear(84, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
@@ -26,7 +26,7 @@ class Net(nn.Module):
         return self.fc3(x)
     
 class LeNet(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes: int) -> None:
       super().__init__()
       self.conv1 = nn.Conv2d(3, 16, 3, 1, padding=1) # input is color image, hence 3 i/p channels. 16 filters, kernal size is tuned to 3 to avoid overfitting, stride is 1 , padding is 1 extract all edge features.
       self.conv2 = nn.Conv2d(16, 32, 3, 1, padding=1) # We double the feature maps for every conv layer as in pratice it is really good.
@@ -34,7 +34,7 @@ class LeNet(nn.Module):
       self.fc1 = nn.Linear(4*4*64, 500) # I/p image size is 32*32, after 3 MaxPooling layers it reduces to 4*4 and 64 because our last conv layer has 64 outputs. Output nodes is 500
       #self.dropout1 = nn.Dropout(0.5)
       self.dropout1 = nn.Dropout(0.2)
-      self.fc2 = nn.Linear(500, 10) # output nodes are 10 because our dataset have 10 different categories
+      self.fc2 = nn.Linear(500, num_classes) # output nodes are 10 because our dataset have 10 different categories
     def forward(self, x):
       x = F.relu(self.conv1(x)) #Apply relu to each output of conv layer.
       x = F.max_pool2d(x, 2, 2) # Max pooling layer with kernal of 2 and stride of 2
@@ -48,12 +48,11 @@ class LeNet(nn.Module):
       x = self.fc2(x)
       return x
     
-def train(net, trainloader, validationloader, optimizer, epochs, device: str):
+def train(net, trainloader, validationloader, optimizer, epochs, num_classes, device: str):
     """Train the network on the training set.
 
     This is a fairly simple training loop for PyTorch.
     """
-    num_classes = 10
     # TRAIN
     criterion = nn.CrossEntropyLoss()
     net.train()
@@ -94,13 +93,12 @@ def train(net, trainloader, validationloader, optimizer, epochs, device: str):
 
     return train_loss, metrics_val_distributed_fit
 
-def test(net, testloader, device: str):
+def test(net, testloader, num_classes, device: str):
     """Validate the network on the entire test set.
     and report loss and accuracy.
     """
     criterion = nn.CrossEntropyLoss()
     correct, total_size, loss = 0, 0, 0.
-    num_classes = 10
     net.eval()
     net.to(device)
     with torch.no_grad():

@@ -13,7 +13,8 @@ class FlowerClient(fl.client.NumPyClient):
         self.trainloader = trainloader
         self.validationloader = validationloader
         self.local_acc = None
-        self.model = LeNet()
+        self.model = LeNet(num_classes)
+        self.num_classes = num_classes
         self.device = torch.device("cuda" if torch.cuda.is_available() and (device == 'GPU' or device == 'H100') else "cpu")
 
     def set_parameters(self, parameters):
@@ -38,14 +39,14 @@ class FlowerClient(fl.client.NumPyClient):
                 epochs = config['local_epochs']
             optim = torch.optim.Adam(self.model.parameters(), lr=lr)
             #local training
-            distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.device)
+            distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, self.device)
         
         return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'energy used': '10W', 'distr_val_loss': '##'}
 
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         self.set_parameters(parameters)
-        loss, accuracy = test(self.model, self.validationloader, self.device)
+        loss, accuracy = test(self.model, self.validationloader, self.num_classes, self.device)
         self.local_acc = accuracy
         return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
     

@@ -32,7 +32,7 @@ def main(cfg: DictConfig):
     epochs = cfg.num_rounds
     lr = cfg.config_fit.lr
     batch_size = cfg.batch_size
-
+    num_classes = cfg.num_clases
 
     #2. LOAD DATASET    
     trainloader, validationloader, testloader = prepare_dataset_cnl(batch_size=batch_size, seed=cfg.seed)
@@ -42,18 +42,18 @@ def main(cfg: DictConfig):
     print("Using device:", device)
 
     #model = Net(num_classes).to(device)
-    model = LeNet().to(device)
+    model = LeNet(num_classes).to(device)
 
     optim = torch.optim.Adam(model.parameters(), lr=lr)
 
     #from tqdm import tqdm
-    train_loss, metrics_val_distributed_fit = train(model, trainloader, validationloader, optim, epochs, device)
+    train_loss, metrics_val_distributed_fit = train(model, trainloader, validationloader, optim, epochs, num_classes, device)
     
     #4. VALIDATION
     history = []
 
     #5. EVALUATION
-    loss, accuracy = test(model, testloader, device)
+    loss, accuracy = test(model, testloader, num_classes, device)
 
  
     #6. SAVE RESULTS

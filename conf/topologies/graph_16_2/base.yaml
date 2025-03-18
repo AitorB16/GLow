@@ -2,7 +2,7 @@ run_name: 'graph_16_2'
 device: GPU
 #topology: './conf/topologies/fully_connected30+5.yaml'
 early_local_train: False
-num_rounds: 2048
+num_rounds: 2040
 batch_size: 128
 num_classes: 10 #output layer size
 balance_data: False

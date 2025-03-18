@@ -12,7 +12,7 @@ import torchvision.datasets as torch_datasets
 
 
 def get_cifar10(data_path: str = "..datasets"):
-    """Downlaod MNIST and apply a simple transform."""
+    """Downlaod CIFAR and apply a simple transform."""
     #ssl._create_default_https_context = ssl._create_unverified_context
     torch_datasets.CIFAR10.url="http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
    
@@ -38,33 +38,42 @@ def get_cifar10(data_path: str = "..datasets"):
     return trainset, testset
 
 
-def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conneceted_client: int, batch_size: int, seed: int, val_ratio: float = 0.1):
+def prepare_dataset_iid(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
 
-    num_images = len(trainset) // num_clients
-    partition_len = [num_images] * num_clients
-    partition_len[last_conneceted_client] += len(trainset) % num_clients #Last client add remaining samples to avoid splitting error
-    
-    # JUST GIVE 0 INSTANCES TO ISLANDS
-    for i in range(num_clients):
-        if i in clients_with_no_data:
-            partition_len[i] = 0
-    
-    to_share = num_images*len(clients_with_no_data) - 0*len(clients_with_no_data)
-    add_to_cli = to_share // (num_clients-len(clients_with_no_data))
-    remainder = to_share % (num_clients-len(clients_with_no_data))
-
-   # JUST GIVE 0 INSTANCES TO ISLANDS
+    clients_with_data = []
     for i in range(num_clients):
         if i not in clients_with_no_data:
-            partition_len[i] += add_to_cli
+            clients_with_data.append(i)
 
-    partition_len[last_conneceted_client] += remainder 
+    # SPLIT DATASET BY CLASSES
+    ordered_trainset = []
+
+    for i in range(num_classes):
+        tmp_part = []
+        for j, data in enumerate(trainset):
+            img, label = data
+            if label == i:
+                tmp_part.append(data)
+        ordered_trainset.extend(tmp_part)
+
+
+    num_images = len(ordered_trainset) // len(clients_with_data)
+    num_images_remainder = len(ordered_trainset) % len(clients_with_data)
     
-    # TRAIN AND VALIDATION PARTITIONS PER AGENT
+    partition_len = [0] * num_clients
+    
+    #SPLIT DS ACCORDINGLY
+    for i in clients_with_data:
+        partition_len[i] = num_images
+        if num_images_remainder > 0:
+            partition_len[i] += 1
+            num_images_remainder -=1
+   
+    ##########
     trainsets = random_split(
-        trainset, partition_len, torch.Generator().manual_seed(seed)
+        ordered_trainset, partition_len, torch.Generator().manual_seed(seed)
     )
     trainloaders = []
     validationloaders = []
@@ -87,9 +96,100 @@ def prepare_dataset(num_clients: int, clients_with_no_data: list[int], last_conn
             trainloaders.append('')
             validationloaders.append('')
 
-    # SINGLE TESTSET PARTITION -- EACH AGENTS MODEL IS TESTED AGAINST THE SAME PARTITION           
-    testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
+    #TEST SET
+    ordered_testset = []
+
+    for i in range(num_classes):
+        tmp_part = []
+        for j, data in enumerate(testset):
+            img, label = data
+            if label == i:
+                tmp_part.append(data)
+        ordered_testset.extend(tmp_part)
+
+
+    testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
     return trainloaders, validationloaders, testloader
+
+
+
+def prepare_dataset_niid(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    """Load CIFAR-10 (training and test set)."""
+    trainset, testset = get_cifar10()
+
+    #num_images = len(trainset) // num_clients
+    clients_with_data = []
+    #partition_len = [0] * num_clients
+    #num_classes = 10
+
+    for i in range(num_clients):
+        if i not in clients_with_no_data:
+            clients_with_data.append(i)
+
+    # SPLIT DATASET BY CLASSES
+    ordered_trainset = []
+
+    for i in range(num_classes):
+        tmp_part = []
+        for j, data in enumerate(trainset):
+            img, label = data
+            if label == i:
+                tmp_part.append(data)
+        ordered_trainset.append(tmp_part)
+
+    # Smart division
+    partition_num_per_agent = num_classes // len(clients_with_data)
+    partition_remainder_per_agent = num_classes % len(clients_with_data)
+
+    trainsets = []
+    for i in range(num_clients):
+        tmp_list = []
+        if i in clients_with_data:
+            for j in range(partition_num_per_agent):
+                tmp_list.extend(ordered_trainset.pop())
+            if partition_remainder_per_agent > 0:
+                tmp_list.extend(ordered_trainset.pop())
+                partition_remainder_per_agent=-1
+        trainsets.append(tmp_list)
+
+    
+    trainloaders = []
+    validationloaders = []
+    
+    # VALIDATION SET
+    for trainset_ in trainsets:
+        num_total = len(trainset_)
+        num_val = int(val_ratio * num_total)
+        num_train = num_total - num_val
+        for_train, for_val = random_split(
+            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
+        )
+        if num_total > 0:
+            trainloaders.append(
+                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
+            )
+            validationloaders.append(
+                DataLoader(for_val, batch_size=batch_size, shuffle=True, num_workers=2)
+            )
+        else:
+            trainloaders.append('')
+            validationloaders.append('')
+
+    #Also smart division?
+    ordered_testset = []
+
+    for i in range(num_classes):
+        tmp_part = []
+        for j, data in enumerate(testset):
+            img, label = data
+            if label == i:
+                tmp_part.append(data)
+        ordered_testset.extend(tmp_part)
+
+
+    testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
+    return trainloaders, validationloaders, testloader
+
 
 
 def prepare_dataset_cnl(batch_size: int, seed: int, val_ratio: float = 0.1):
@@ -105,4 +205,3 @@ def prepare_dataset_cnl(batch_size: int, seed: int, val_ratio: float = 0.1):
     validationloaders = DataLoader(for_val, batch_size=batch_size, shuffle=True, num_workers=2)    
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
     return trainloaders, validationloaders, testloader 
-

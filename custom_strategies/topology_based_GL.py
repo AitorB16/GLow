@@ -140,6 +140,7 @@ class topology_based_Avg(Strategy):
         early_local_train: Optional[bool] = False,
         inplace: bool = True,
         run_id: str,
+        num_classes: int,
         save_path: str
     ) -> None:
         super().__init__()
@@ -171,6 +172,7 @@ class topology_based_Avg(Strategy):
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
         self.run_id = run_id
+        self.num_classes = num_classes
         self.save_path = save_path
         self.early_local_train = early_local_train
 
@@ -225,7 +227,7 @@ class topology_based_Avg(Strategy):
         param_path = self.save_path + 'parameters/'
         os.makedirs(param_path)
         for cli_ID in range(self.min_available_clients):
-            net = LeNet()
+            net = LeNet(self.num_classes)
             cli_params_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
             # Convert `List[np.ndarray]` to PyTorch`state_dict`
             params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
@@ -255,7 +257,6 @@ class topology_based_Avg(Strategy):
         # Save pool results and parameters in last rounds
         if server_round == self.total_rounds:
             self.save_results()
-
 
         return loss, metrics
 

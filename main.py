@@ -11,7 +11,7 @@ import numpy as np
 
 import yaml
 
-from dataset import prepare_dataset
+from dataset import prepare_dataset_iid
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -47,7 +47,7 @@ def main():
 
     
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader = prepare_dataset(num_clients, tplgy['clients_with_no_data'], tplgy['last_connected_client'], cfg['batch_size'], cfg['seed'] )
+    trainloaders, validationloaders, testloader = prepare_dataset_iid(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     
     device = cfg['device']
 
@@ -68,6 +68,7 @@ def main():
         total_rounds = cfg['num_rounds'],
         run_id = run_id,
         early_local_train = cfg['early_local_train'],
+        num_classes=cfg['num_classes'],
         save_path = save_path
     )
 

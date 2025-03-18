@@ -22,7 +22,7 @@ def get_evaluate_fn(num_classes: int, testloader):
 
     def evaluate_fn(server_round: int, parameters, config): #int nparrays, dict
         
-        model = LeNet()
+        model = LeNet(num_classes)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         params_dict = zip(model.state_dict().keys(), parameters)
@@ -30,7 +30,7 @@ def get_evaluate_fn(num_classes: int, testloader):
         model.load_state_dict(state_dict, strict=True)
 
 
-        loss, accuracy = test(model, testloader, device) #global model
+        loss, accuracy = test(model, testloader, num_classes, device) #global model
         return loss, {'acc_cntrl': accuracy}
 
     return evaluate_fn
