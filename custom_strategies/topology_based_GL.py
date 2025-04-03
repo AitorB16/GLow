@@ -45,7 +45,7 @@ from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
-from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -378,6 +378,7 @@ class topology_based_Avg(Strategy):
                 for _, fit_res in results
             ]
             aggregated_ndarrays = aggregate(weights_results)
+            #aggregated_ndarrays = aggregate_median(weights_results)
         
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
 

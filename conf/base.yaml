@@ -6,7 +6,7 @@ num_rounds: 1020
 # num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 # num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
-num_classes: 3 #10 output layer size
+num_classes: 10 #10 output layer size
 balance_data: False
 seed: 2001
 config_fit:
