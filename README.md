@@ -13,6 +13,7 @@ Moreover, a centralized (CNL) and a vanilla Federated (FL) version of the system
 
 ## Dependencies
 Install the required libraries present on [deps.req](deps.req).
+
 Built upon Flower v1.7.0.
 > Note: Python3.10 and pip3 package installer are recommended.
 
