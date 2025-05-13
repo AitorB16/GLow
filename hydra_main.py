@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     # 3. DEFINE YOUR CLIENTS
@@ -129,6 +129,12 @@ def main(cfg: DictConfig):
     f = open(save_path + "/acc_distr.out", "w")
     f.write(acc_distr)
     f.close()
+    
+    # PARTITIONS
+    out = ''
+    out = out + ' '.join([str(partition) for partition in partitions]) + '\n'
+    f = open(save_path + "/partitions.out", "w")
+    f.write(out)
 
 if __name__ == "__main__":
     main()

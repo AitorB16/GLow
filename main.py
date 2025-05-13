@@ -11,7 +11,7 @@ import numpy as np
 
 import yaml
 
-from dataset import prepare_dataset_iid
+from dataset import prepare_dataset_iid, prepare_dataset_niid
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -47,7 +47,7 @@ def main():
 
     
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader = prepare_dataset_iid(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     
     device = cfg['device']
 
@@ -116,12 +116,20 @@ def main():
     f = open(save_path + run_id + "_raw.out", "w")
     f.write(out)
     f.close()
+    
     acc_distr = ''
     for i in range(cfg['num_rounds']):
         acc_distr = acc_distr + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr'][i][1]])+'\n'
+    
     f = open(save_path + run_id + "_acc_distr.out", "w")
     f.write(acc_distr)
     f.close()
+
+    # PARTITIONS
+    out = ''
+    out = out + ' '.join([str(partition) for partition in partitions]) + '\n'
+    f = open(save_path + run_id + "_partitions.out", "w")
+    f.write(out)
 
 if __name__ == "__main__":
     main()

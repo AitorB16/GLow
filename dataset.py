@@ -109,7 +109,7 @@ def prepare_dataset_iid(num_clients: int, num_classes: int, clients_with_no_data
 
 
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader
+    return trainloaders, validationloaders, testloader, partition_len
 
 def prepare_dataset_niid(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set). DIRICHLET"""
@@ -132,8 +132,9 @@ def prepare_dataset_niid(num_clients: int, num_classes: int, clients_with_no_dat
         ordered_trainset.extend(tmp_part)
 
     # SPLIT DIRICHLET DISTRIBUTION
+    alpha = 1.
     np.random.seed(seed=seed)
-    dirich = np.random.dirichlet([1]*len(clients_with_data))
+    dirich = np.random.dirichlet([alpha]*len(clients_with_data))
 
     #num_images = len(ordered_trainset) // len(clients_with_data)
     #num_images_remainder = len(ordered_trainset) % len(clients_with_data)
@@ -150,8 +151,6 @@ def prepare_dataset_niid(num_clients: int, num_classes: int, clients_with_no_dat
 
     remainder = len(ordered_trainset) - total_instances
     partition_len[clients_with_data[0]] += remainder
-   
-    print(partition_len)
 
     ##########
     trainsets = random_split(
@@ -191,7 +190,7 @@ def prepare_dataset_niid(num_clients: int, num_classes: int, clients_with_no_dat
 
 
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader
+    return trainloaders, validationloaders, testloader, partition_len
 
 
 def prepare_dataset_niid_class_partition(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
@@ -269,7 +268,7 @@ def prepare_dataset_niid_class_partition(num_clients: int, num_classes: int, cli
 
 
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader
+    return trainloaders, validationloaders, testloader, partition_num_per_agent
 
 
 
@@ -285,4 +284,4 @@ def prepare_dataset_cnl(batch_size: int, seed: int, val_ratio: float = 0.1):
     trainloaders = DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
     validationloaders = DataLoader(for_val, batch_size=batch_size, shuffle=True, num_workers=2)    
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader 
+    return trainloaders, validationloaders, testloader

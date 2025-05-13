@@ -21,9 +21,7 @@ from server import get_on_fit_config, get_evaluate_fn
 from flwr.client import ClientFn
 from flwr.server.client_manager import ClientManager, SimpleClientManager
 
-
 from custom_strategies.fedavg import FedAvg
-
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
 def main(cfg: DictConfig):
@@ -42,12 +40,11 @@ def main(cfg: DictConfig):
 
     
     #2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader = prepare_dataset_iid(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed, )
+    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     #3. DEFINE YOUR CLIENTS
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, device)
-
     cli_per_round = round(num_clients / 4)
 
 
