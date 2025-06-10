@@ -1,5 +1,5 @@
 run_name: '0'
-topology: './conf/topologies/custom_0.yaml'
+topology: './conf/topologies/graph_8_2/graph_1.yaml'
 device: GPU
 early_local_train: False
 num_rounds: 1020

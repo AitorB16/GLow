@@ -132,7 +132,7 @@ def prepare_dataset_niid(num_clients: int, num_classes: int, clients_with_no_dat
         ordered_trainset.extend(tmp_part)
 
     # SPLIT DIRICHLET DISTRIBUTION
-    alpha = 1.
+    alpha = 0.4
     np.random.seed(seed=seed)
     dirich = np.random.dirichlet([alpha]*len(clients_with_data))
 
