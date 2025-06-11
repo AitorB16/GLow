@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloader, partitions = prepare_dataset_niid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     # 3. DEFINE YOUR CLIENTS
@@ -116,9 +116,9 @@ def main(cfg: DictConfig):
     print('#################')
     print(str(history.metrics_centralized))
     #print("--- %s seconds ---" % (time.time() - start_time))
-    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
+    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out = out + '\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']])
+    out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']])
     out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + "/raw.out", "w")
     f.write(out)

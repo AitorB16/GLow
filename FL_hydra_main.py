@@ -111,9 +111,9 @@ def main(cfg: DictConfig):
     print('#################')
     print(str(history.metrics_centralized))
     #print("--- %s seconds ---" % (time.time() - start_time))
-    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_centralized: " + ' '.join([str(elem) for elem in history.losses_centralized])
+    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out = out + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out = out + '\n\n**metrics_centralized: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
+    out = out + '\n\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n'
     out = out + '\n\n**Exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + "/raw.out", "w")
     f.write(out)

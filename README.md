@@ -109,7 +109,7 @@ sh sing_exp.sh main.py <conf_file.yaml> <run_name> <specific topology ID>
 The output of each experiment consists in the following files:
 
 - **pool.out:** Accuracies and Losses obtained by each pool (node head) after *n* communication rounds
-- **raw.out:** Full output; *losses_distributed*, *losses_centralized*, *acc_distr*, *cid*, *metrics_centralized*, *Exec_time*
+- **raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *Exec_time*
 - **parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
 
 > Note: **acc_distr.out:** Contains distributed accuracies obtained by each agent per communication round -- parsed version of raw.out for visualization purposes.
