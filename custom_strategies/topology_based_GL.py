@@ -45,7 +45,7 @@ from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
-from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_median, weighted_loss_avg
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -63,9 +63,9 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 # pylint: disable=line-too-long
 class topology_based_Avg(Strategy):
-    """Federated Averaging strategy.
+    """Decentralized Averaging strategy.
 
-    Implementation based on https://arxiv.org/abs/1602.05629
+    Implementation based on https://arxiv.org/abs/2501.10463
 
     Parameters
     ----------
@@ -138,7 +138,7 @@ class topology_based_Avg(Strategy):
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         early_local_train: Optional[bool] = False,
-        inplace: bool = True,
+        aggregation: str = 'inplace',
         run_id: str,
         num_classes: int,
         save_path: str
@@ -168,7 +168,7 @@ class topology_based_Avg(Strategy):
         self.selected_pool = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
-        self.inplace = inplace
+        self.aggregation = 'inplace'
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
         self.run_id = run_id
@@ -252,7 +252,6 @@ class topology_based_Avg(Strategy):
         # Track each pool metrics and results
         self.pool_losses[self.selected_pool] = loss
         self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
-
         
         # Save pool results and parameters in last rounds
         if server_round == self.total_rounds:
@@ -345,8 +344,8 @@ class topology_based_Avg(Strategy):
             evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
             pairs.append((client, evaluate_ins))
         # Return client/config pairs
-        return pairs
-    
+        return pairs 
+
 
     def aggregate_fit(
         self,
@@ -357,6 +356,7 @@ class topology_based_Avg(Strategy):
         """Aggregate fit results using weighted average."""
         if not results:
             return None, {}
+        
         # Do not aggregate if there are failures and failures are not accepted
         if not self.accept_failures and failures:
             return None, {}
@@ -367,14 +367,16 @@ class topology_based_Avg(Strategy):
                 if client.cid != self.selected_pool:
                     fit_res.num_examples = 0
 
-        if self.inplace:
+        if self.aggregation == 'score':
+            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.topology[self.selected_pool], self.selected_pool)
+        elif self.aggregation == 'inplace':
             # Does in-place weighted average of results
             '''Detect if results are 0'''
             aggregated_ndarrays = aggregate_inplace(results)
         else:
             # Does weighted average of results
             weights_results = [
-                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
+                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples) #fit_res.metrics
                 for _, fit_res in results
             ]
             aggregated_ndarrays = aggregate(weights_results)
@@ -391,7 +393,6 @@ class topology_based_Avg(Strategy):
             log(WARNING, "No fit_metrics_aggregation_fn provided")
 
         self.pool_parameters[self.selected_pool] = parameters_aggregated
-
 
         '''Spread knowledge to other clients'''
         #No point updating local network parameter of the neighbors with the local average and model

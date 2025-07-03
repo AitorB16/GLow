@@ -48,7 +48,6 @@ def main():
     
     # 2. PREAPRE YOUR DATASET
     trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
-    
     device = cfg['device']
 
     # 3. DEFINE YOUR CLIENTS

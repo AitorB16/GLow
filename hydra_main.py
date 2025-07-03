@@ -26,6 +26,7 @@ from custom_strategies.topology_based_GL import topology_based_Avg
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
 def main(cfg: DictConfig):
+    
     # 1. LOAD CONFIGURATION AND TOPOLOGY
     start_time = time.time()
     print(OmegaConf.to_yaml(cfg))
@@ -43,7 +44,7 @@ def main(cfg: DictConfig):
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader, partitions = prepare_dataset_niid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     # 3. DEFINE YOUR CLIENTS

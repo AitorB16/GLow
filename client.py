@@ -25,6 +25,12 @@ class FlowerClient(fl.client.NumPyClient):
     def get_parameters(self, config: Dict[str, Scalar]):
         return [ val.cpu().numpy() for _, val in self.model.state_dict().items()]
     
+    def set_local_acc(self, acc):
+        self.local_acc = acc
+
+    def get_local_acc(self):
+        return self.local_acc
+    
     def fit(self, parameters, config):
         #copy params from server in local models
         self.set_parameters(parameters)
@@ -33,26 +39,24 @@ class FlowerClient(fl.client.NumPyClient):
         #Perform local training just in the selected node head
         if config['local_train_cid'] == self.cid or config['local_train_cid'] == -1: # Case for GL or Case for FL
             lr = config['lr']
-            if config['comm_round'] <= config['num_nodes']: #in first n initial rounds
-                epochs = config['local_epochs'] # Option to achieve a faster converge in the first *3 epochs
+            if config['comm_round'] <= config['num_nodes']: # In first n initial rounds
+                epochs = config['local_epochs'] # Option to achieve a faster converge in the first * 3 epochs
             else:
                 epochs = config['local_epochs']
             optim = torch.optim.Adam(self.model.parameters(), lr=lr)
             #local training
             distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, self.device)
         
-        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'energy used': '10W', 'distr_val_loss': '##'}
+            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'HEAD': 'YES', 'distr_val_loss': '##'}
+        
+        #Return current acc and params from neighbours
+        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'HEAD': 'NO', 'distr_val_loss': '##'}
 
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         self.set_parameters(parameters)
         loss, accuracy = test(self.model, self.validationloader, self.num_classes, self.device)
-        self.local_acc = accuracy
         return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
-    
-    def get_local_acc(self):
-        return self.local_acc   
-
 
 def generate_client_fn(vcid, trainloaders, validationloaders, num_classes, device):
     def client_fn(cid: str):
