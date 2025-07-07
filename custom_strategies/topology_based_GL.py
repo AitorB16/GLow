@@ -138,7 +138,7 @@ class topology_based_Avg(Strategy):
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         early_local_train: Optional[bool] = False,
-        aggregation: str = 'inplace',
+        aggregation: str = 'score',
         run_id: str,
         num_classes: int,
         save_path: str
@@ -168,7 +168,7 @@ class topology_based_Avg(Strategy):
         self.selected_pool = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
-        self.aggregation = 'inplace'
+        self.aggregation = 'score'
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
         self.run_id = run_id
@@ -244,7 +244,7 @@ class topology_based_Avg(Strategy):
             # No evaluation function provided
             return None
         parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
-        eval_res = self.evaluate_fn(server_round, parameters_ndarrays, {})
+        eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, {})
         if eval_res is None:
             return None
         loss, metrics = eval_res

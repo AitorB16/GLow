@@ -14,7 +14,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 import yaml
 
-from dataset import prepare_dataset_iid, prepare_dataset_niid
+from dataset import prepare_dataset_iid, prepare_dataset_niid, prepare_dataset_niid_indep_testsets
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -44,7 +44,7 @@ def main(cfg: DictConfig):
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_indep_testsets(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     # 3. DEFINE YOUR CLIENTS
@@ -57,7 +57,7 @@ def main(cfg: DictConfig):
         fraction_evaluate=0.00001,
         min_available_clients=num_clients,
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
-        evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
+        evaluate_fn=get_evaluate_fn(cfg.num_classes, testloaders),
         fit_metrics_aggregation_fn = cli_val_distr,
         evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
         total_rounds = cfg.num_rounds,
@@ -133,7 +133,8 @@ def main(cfg: DictConfig):
     
     # PARTITIONS
     out = ''
-    out = out + ' '.join([str(partition) for partition in partitions]) + '\n'
+    out = out + ' '.join([str(partition) for partition in partitions_train]) + '\n\n'
+    out = out + ' '.join([str(partition) for partition in partitions_test]) + '\n'
     f = open(save_path + "/partitions.out", "w")
     f.write(out)
 
