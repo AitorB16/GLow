@@ -47,10 +47,10 @@ class FlowerClient(fl.client.NumPyClient):
             #local training
             distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, self.device)
         
-            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'HEAD': 'YES', 'distr_val_loss': '##'}
+            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
         
         #Return current acc and params from neighbours
-        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'HEAD': 'NO', 'distr_val_loss': '##'}
+        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'HEAD': 'NO', 'distr_val_loss': '##', 'energy used': '10W'}
 
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
@@ -78,5 +78,6 @@ def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List
     for num_examples, m in metrics:
         acc.append(m['acc_val_distr'])
         vcid.append(m['cid'])
+    
     # Aggregate and return custom metric (weighted average)
     return {"acc_val_distr": acc, "cid": vcid}

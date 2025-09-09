@@ -45,13 +45,13 @@ def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
 
 
 def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
-    
     """Compute in-place weighted average."""
     # Count total examples
     num_examples_total = sum(fit_res.num_examples for (_, fit_res) in results)
     
-    #DETECT IF IS GREATER THAN 0 (i.e., NODE HAS LOCAL INSTANCES) AVOID DIVISION BY 0 (ISLANDS)
+    # DETECT IF IS GREATER THAN 0 (i.e., NODE HAS LOCAL INSTANCES) AVOID DIVISION BY 0 (ISLANDS)
     if num_examples_total > 0:
+    
     # Compute scaling factors for each result
         scaling_factors = [
             fit_res.num_examples / num_examples_total for _, fit_res in results
@@ -75,24 +75,27 @@ def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
     return params
 
 
-def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], connections: List[int], head_id: int) -> NDArrays:
+def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
     """Compute score weighted average."""
-
-    cconnections = connections.copy()
-    cconnections.remove(head_id)
+    neighbours_cpy = neighbours.copy()
+    neighbours_cpy.remove(head_id)
 
     # Count total examples
     scaling_norm = sum(fit_res.metrics['acc_val_distr'] for (_, fit_res) in results if fit_res.metrics['acc_val_distr'] is not None)
-    for id in cconnections:
+    for id in neighbours_cpy:
         if neighbour_metrics[id] is not None:
             scaling_norm += neighbour_metrics[id]
+
+    # AVOID DIVISION BY 0
+    if scaling_norm == 0:
+        scaling_norm = 1.0
 
     scaling_factors = []
     for _, fit_res in results: 
         if fit_res.metrics['acc_val_distr'] is not None:
             scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
         else:
-            neighbour = neighbour_metrics[cconnections.pop()]
+            neighbour = neighbour_metrics[neighbours_cpy.pop()]
             if neighbour is not None:
                 scaling_factors.append(neighbour / scaling_norm)
             else:
@@ -109,7 +112,52 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
             for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
+    return params
 
+def aggregate_score_neigh_params(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
+    """Compute score weighted average."""
+
+    neighbour_metrics_cpy = neighbour_metrics.copy()
+    neighbours_cpy = neighbours.copy()
+
+    #Remove head
+    neighbour_metrics_cpy.pop()
+    neighbours_cpy.pop()
+
+    # Count total examples
+    scaling_norm = sum(fit_res.metrics['acc_val_distr'] for (_, fit_res) in results if fit_res.metrics['acc_val_distr'] is not None) #Just head is not None
+    
+    for metric in neighbour_metrics_cpy:
+        if metric is not None:
+            scaling_norm += metric
+
+    # AVOID DIVISION BY 0
+    if scaling_norm == 0:
+        scaling_norm = 1.0
+
+    scaling_factors = []
+    for _, fit_res in results: 
+        if fit_res.metrics['acc_val_distr'] is not None:
+            scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
+        else:
+            #metrics = neighbour_metrics_cpy[neighbours_cpy.pop()]
+            metrics = neighbour_metrics_cpy.pop()
+            if metrics is not None:
+                scaling_factors.append(metrics / scaling_norm)
+            else:
+                scaling_factors.append(0.)
+
+    # Let's do in-place aggregation
+    # Get first result, then add up each other
+    params = [
+        scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)
+    ]
+    for i, (_, fit_res) in enumerate(results[1:]):
+        res = (
+            scaling_factors[i + 1] * x
+            for x in parameters_to_ndarrays(fit_res.parameters)
+        )
+        params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
     return params
 
 
@@ -182,7 +230,6 @@ def aggregate_bulyan(
         Byzantine resilient aggregation rule used as the first step of the Bulyan
     aggregation_rule_kwargs: Any
         The arguments to the aggregation rule.
-
     Returns
     -------
     aggregated_parameters: NDArrays

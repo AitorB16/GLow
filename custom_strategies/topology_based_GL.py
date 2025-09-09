@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Topology based GL [Belenguer et al., 2024] strategy.
+"""Topology based GL [Belenguer et al., 2025] strategy.
 
 Manuscript: ###############
 """
@@ -23,8 +23,6 @@ import numpy as np
 from collections import OrderedDict
 import torch
 from model import LeNet
-
-
 
 from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -41,11 +39,12 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
+
 from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
-from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_median, weighted_loss_avg
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_neigh_params, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -138,7 +137,7 @@ class topology_based_Avg(Strategy):
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         early_local_train: Optional[bool] = False,
-        aggregation: str = 'score',
+        aggregation: str = 'score_neigh_params',
         run_id: str,
         num_classes: int,
         save_path: str
@@ -168,13 +167,20 @@ class topology_based_Avg(Strategy):
         self.selected_pool = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
-        self.aggregation = 'score'
+        self.aggregation = 'score_neigh_params'
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
         self.run_id = run_id
         self.num_classes = num_classes
         self.save_path = save_path
         self.early_local_train = early_local_train
+        
+        # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE LOCAL ACCURACIES AND PARAMS
+        self.neigh_metrics = []
+        for i in range(min_available_clients):
+            self.neigh_metrics.append([])
+            for j in topology[i]:
+                self.neigh_metrics[i].append(None)
 
     def __repr__(self) -> str:
         """Compute a string representation of the strategy."""
@@ -220,7 +226,7 @@ class topology_based_Avg(Strategy):
         out = ''
         for cli_ID in range(self.min_available_clients):
             out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
-        f = open(self.save_path + self.run_id + "_pool.out", "w")
+        f = open(self.save_path + str(self.run_id) + "_pool.out", "w")
         f.write(out)
         f.close()
         # save parameters
@@ -236,28 +242,65 @@ class topology_based_Avg(Strategy):
             # Save the model
             torch.save(net.state_dict(), param_path + str(cli_ID) + '.pth')
 
+    #EVALUATE INPLACE WEIGHT AVG (SAME TESTSET)
+    #def evaluate(
+    #    self, server_round: int, parameters: Parameters
+    #) -> Optional[Tuple[float, Dict[str, Scalar]]]:
+    #    """Evaluate model parameters using an evaluation function."""
+    #    if self.evaluate_fn is None:
+    #        # No evaluation function provided
+    #        return None
+    #    parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool]) #GET CUSTOM PARAMS
+    #    eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, {}) #CALL CUSTOM FUNC
+    #    if eval_res is None:
+    #        return None
+    #    loss, metrics = eval_res
+    #
+    #    # Track each pool metrics and results
+    #    self.pool_losses[self.selected_pool] = loss
+    #    self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+    #    
+    #    # Save pool results and parameters in last rounds
+    #    if server_round == self.total_rounds:
+    #        self.save_results()
+    #
+    #    return loss, metrics
+
+
+    #EVALUATE PARAM PROPAGATION NEIGH (INDEPENDENT TESTSETS)
     def evaluate(
         self, server_round: int, parameters: Parameters
     ) -> Optional[Tuple[float, Dict[str, Scalar]]]:
         """Evaluate model parameters using an evaluation function."""
+
         if self.evaluate_fn is None:
             # No evaluation function provided
             return None
-        parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
-        eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, {})
-        if eval_res is None:
-            return None
-        loss, metrics = eval_res
+        
+        n = 0
+        for neighbour in self.topology[self.selected_pool]:
+            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
+            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, {}) #CALL CUSTOM FUNC
+            
+            if eval_res is None:
+                return None
+            
+            loss, metrics = eval_res
+            self.neigh_metrics[self.selected_pool][n] = metrics['acc_cntrl']
 
-        # Track each pool metrics and results
-        self.pool_losses[self.selected_pool] = loss
-        self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+            # Track each pool metrics and results
+            if neighbour == self.selected_pool:
+                self.pool_losses[self.selected_pool] = loss
+                self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+                head_loss = loss
+                head_metrics = metrics
+            n+=1
         
         # Save pool results and parameters in last rounds
         if server_round == self.total_rounds:
             self.save_results()
-
-        return loss, metrics
+        
+        return head_loss, head_metrics
 
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
@@ -285,6 +328,14 @@ class topology_based_Avg(Strategy):
             num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
         )
 
+        # SORT CLIENTS FOR FUTURE AGGREGATIONS
+        sorted_clients = []
+        for neigh in connections:
+            for client in clients:
+                if neigh == client.cid:
+                    sorted_clients.append(client)
+
+        
         """Configure the next round of training."""
         config = {}
         if self.on_fit_config_fn is not None:
@@ -294,7 +345,7 @@ class topology_based_Avg(Strategy):
             config['comm_round'] = server_round
             config['num_nodes'] = self.min_available_clients
         pairs = []
-        for client in clients:
+        for client in sorted_clients:
             fit_ins = FitIns(self.pool_parameters[client.cid], config)
             pairs.append((client, fit_ins))
 
@@ -333,6 +384,13 @@ class topology_based_Avg(Strategy):
             num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
         )
 
+        # SORT CLIENTS FOR FUTURE AGGREGATIONS
+        sorted_clients = []
+        for neigh in connections:
+            for client in clients:
+                if neigh == client.cid:
+                    sorted_clients.append(client)
+
         # Parameters and config
         config = {}
         if self.on_evaluate_config_fn is not None:
@@ -340,12 +398,11 @@ class topology_based_Avg(Strategy):
             config = self.on_evaluate_config_fn(server_round)
             config['local_train_cid'] = self.selected_pool
         pairs = []
-        for client in clients:
+        for client in sorted_clients:
             evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
             pairs.append((client, evaluate_ins))
         # Return client/config pairs
         return pairs 
-
 
     def aggregate_fit(
         self,
@@ -362,13 +419,15 @@ class topology_based_Avg(Strategy):
             return None, {}
 
         #Don't aggregate other pool mates in first rounds
-        if self.early_local_train and server_round <= self.min_available_clients:
-            for client, fit_res in results:
-                if client.cid != self.selected_pool:
-                    fit_res.num_examples = 0
+        #if self.early_local_train and server_round <= self.min_available_clients:
+        #    for client, fit_res in results:
+        #        if client.cid != self.selected_pool:
+        #            fit_res.num_examples = 0
 
         if self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.topology[self.selected_pool], self.selected_pool)
+        elif self.aggregation == 'score_neigh_params':
+            aggregated_ndarrays = aggregate_score_neigh_params(results, self.neigh_metrics[self.selected_pool], self.topology[self.selected_pool], self.selected_pool)
         elif self.aggregation == 'inplace':
             # Does in-place weighted average of results
             '''Detect if results are 0'''

@@ -14,7 +14,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 import yaml
 
-from dataset import prepare_dataset_iid, prepare_dataset_niid, prepare_dataset_niid_indep_testsets
+from dataset import prepare_dataset_iid, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -44,7 +44,7 @@ def main(cfg: DictConfig):
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_indep_testsets(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_niid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     # 3. DEFINE YOUR CLIENTS
@@ -67,7 +67,7 @@ def main(cfg: DictConfig):
         save_path = save_path
     )
 
-    ''' In case new strategies and configurations are deployed on run'''
+    ''' In case new strategies and configurations are deployed on run (NOT IN USE CURRENTLY)'''
     '''strategy_pool = []
     for cli_ID in vcid:
         strategy_pool.append(strategy)
@@ -100,12 +100,7 @@ def main(cfg: DictConfig):
         client_resources={'num_cpus': 4, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
-    # 6. SAVE RESULTS
-    #results_path = Path(save_path) / "results.pkl"
-    #results = {"history": history, "anythingelse": "here"}
-    #with open(str(results_path), "wb") as h:
-    #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
-    
+    # 6. SAVE RESULTS    
     print('#################')
     print(str(history.losses_distributed))
     print('#################')
@@ -116,7 +111,7 @@ def main(cfg: DictConfig):
     print(str(history.metrics_distributed))
     print('#################')
     print(str(history.metrics_centralized))
-    #print("--- %s seconds ---" % (time.time() - start_time))
+
     out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
     out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']])
@@ -124,6 +119,7 @@ def main(cfg: DictConfig):
     f = open(save_path + "/raw.out", "w")
     f.write(out)
     f.close()
+    
     acc_distr = ''
     for i in range(cfg.num_rounds):
         acc_distr = acc_distr + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr'][i][1]])+'\n'
