@@ -14,14 +14,14 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 import yaml
 
-from dataset import prepare_dataset_iid, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
+from dataset import prepare_dataset_iid, prepare_dataset_niid_train, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test, prepare_dataset_niid_class_partition
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
 from flwr.client import ClientFn
 from flwr.server.client_manager import ClientManager, SimpleClientManager
 
-from custom_strategies.topology_based_GL import topology_based_Avg
+from custom_strategies.GLow_strategy import GLow_strategy
 
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
@@ -44,15 +44,28 @@ def main(cfg: DictConfig):
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_niid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    if cfg.split_dataset == 'prepare_dataset_iid':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    elif cfg.split_dataset == 'prepare_dataset_niid_train':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    elif cfg.split_dataset == 'prepare_dataset_niid_train_iid_test':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_iid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    elif cfg.split_dataset == 'prepare_dataset_niid_train_niid_test':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_niid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    elif cfg.split_dataset == 'prepare_dataset_niid_class_partition':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_class_partition(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+
+
 
     device = cfg.device
+    
     # 3. DEFINE YOUR CLIENTS
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, device)
 
     # 4. DEFINE A STRATEGY
-    strategy = topology_based_Avg(
+    strategy = GLow_strategy(
         topology=topology,
+        aggregation=cfg.aggregation,
         fraction_fit=0.00001,
         fraction_evaluate=0.00001,
         min_available_clients=num_clients,

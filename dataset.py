@@ -39,6 +39,7 @@ def get_cifar10(data_path: str = "..datasets"):
 
 
 def prepare_dataset_iid(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    # SEVERAL TRAIN SETS / COMMON TEST SET
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
 
@@ -64,18 +65,18 @@ def prepare_dataset_iid(num_clients: int, num_classes: int, clients_with_no_data
     num_images = len(ordered_trainset) // len(clients_with_data)
     num_images_remainder = len(ordered_trainset) % len(clients_with_data)
     
-    partition_len = [0] * num_clients
+    partition_len_train = [0] * num_clients
     
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len[i] = num_images
+        partition_len_train[i] = num_images
         if num_images_remainder > 0:
-            partition_len[i] += 1
+            partition_len_train[i] += 1
             num_images_remainder -=1
    
     ##########
     trainsets = random_split(
-        ordered_trainset, partition_len, torch.Generator().manual_seed(seed)
+        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
     )
     trainloaders = []
     validationloaders = []
@@ -111,10 +112,11 @@ def prepare_dataset_iid(num_clients: int, num_classes: int, clients_with_no_data
 
 
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader, partition_len
+    return trainloaders, validationloaders, testloader, partition_len_train, [len(ordered_testset)]
 
-def prepare_dataset_niid_train(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, alpha: float = 0.4, val_ratio: float = 0.1):
-    """Load CIFAR-10 (training and test set). DIRICHLET"""
+def prepare_dataset_niid_train(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+    # SEVERAL TRAIN SETS / COMMON TEST SET
+    """Load CIFAR-10 (training and test-set). DIRICHLET"""
     trainset, testset = get_cifar10()
 
     clients_with_data = []
@@ -136,27 +138,27 @@ def prepare_dataset_niid_train(num_clients: int, num_classes: int, clients_with_
         ordered_trainset.extend(tmp_part)
 
     # SPLIT DIRICHLET DISTRIBUTION
+    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
+
     np.random.seed(seed=seed)
-    dirich = np.random.dirichlet([alpha]*len(clients_with_data))
+    dirich = np.random.dirichlet(alpha)
     
-    partition_len = [0] * num_clients
+    partition_len_train = [0] * num_clients
     total_instances = 0
     j = 0
     
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len[i] = int(len(ordered_trainset)*dirich[j])
-        total_instances += partition_len[i]
+        partition_len_train[i] = int(len(ordered_trainset)*dirich[j])
+        total_instances += partition_len_train[i]
         j+=1
 
     remainder = len(ordered_trainset) - total_instances
-    partition_len[clients_with_data[0]] += remainder
+    partition_len_train[clients_with_data[0]] += remainder
    
-    print(partition_len)
-
     ##########
     trainsets = random_split(
-        ordered_trainset, partition_len, torch.Generator().manual_seed(seed)
+        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
     )
     trainloaders = []
     validationloaders = []
@@ -192,9 +194,9 @@ def prepare_dataset_niid_train(num_clients: int, num_classes: int, clients_with_
 
 
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader, partition_len
+    return trainloaders, validationloaders, testloader, partition_len_train, [len(ordered_testset)]
 
-def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, alpha: float = 0.4, val_ratio: float = 0.1):
+def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set). DIRICHLET"""
     trainset, testset = get_cifar10()
 
@@ -217,8 +219,16 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
         ordered_trainset.extend(tmp_part)
 
     # SPLIT DIRICHLET DISTRIBUTION
+    #alpha = [10., 1., 1., 2., 2., 1., 1., 10. ]
+    #alpha = [20., 1., 2., 4., 4., 2., 1., 20. ]
+    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
+    #alpha = [1., 1., 1., 20., 1., 1., 1., 40., 40., 1., 1., 1., 20., 1., 1., 1. ]
+    #alpha = [1., 1., 1., 20., 1., 1., 1., 60., 60., 1., 1., 1., 1., 100., 1., 1. ]
+    #alpha = [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1. ]
+
     np.random.seed(seed=seed)
-    dirich = np.random.dirichlet([alpha]*len(clients_with_data))
+    #dirich = np.random.dirichlet([alpha]*len(clients_with_data))
+    dirich = np.random.dirichlet(alpha)
     
     partition_len_train = [0] * num_clients
     total_instances = 0
@@ -297,7 +307,7 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     return trainloaders, validationloaders, testloaders, partition_len_train, partition_len_test
 
 
-def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, alpha: float = 0.4, val_ratio: float = 0.1):
+def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set). DIRICHLET"""
     trainset, testset = get_cifar10()
 
@@ -320,8 +330,10 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
         ordered_trainset.extend(tmp_part)
 
     # SPLIT DIRICHLET DISTRIBUTION
+    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
+    
     np.random.seed(seed=seed)
-    dirich = np.random.dirichlet([alpha]*len(clients_with_data))
+    dirich = np.random.dirichlet(alpha)
     
     partition_len_train = [0] * num_clients
     total_instances = 0
@@ -474,7 +486,7 @@ def prepare_dataset_niid_class_partition(num_clients: int, num_classes: int, cli
 
 
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader, partition_num_per_agent
+    return trainloaders, validationloaders, testloader, partition_num_per_agent, [len(ordered_testset)]
 
 
 

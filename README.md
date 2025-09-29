@@ -30,7 +30,9 @@ Configuration files in GLow are composed by a base file and a topology file.
 
 Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
+- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_neigh_params'*
 - **topology:** str; path to yaml file containing system topology
+- **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid'*, *'prepare_dataset_niid_train'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*, *'prepare_dataset_niid_class_partition'*
 - **device:** str; select among *CPU*, *GPU*, *H100*
 - **early_local_train:** bool; to force the system work in SL for the first *n* communication rounds before neighbor aggregation 
 - **num_rounds:** int; total number of communication rounds
@@ -47,7 +49,7 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 Example file located in [conf/topologies/graph_8_2/graph_1.yaml](conf/topologies/graph_8_2/graph_1.yaml) following structure:
 - **num_clients:** int; total number of agents
 - **max_num_clients_per_round:** int; max number of clients performing aggregation (i.e., number of neighbors)
-- **clients_with_no_data:** int list; containing the IDs of special nodes with no local instances
+- **clients_with_no_data:** int list (optional); containing the IDs of special nodes with no local instances
 - **last_connected_client:** int; ID of last node connected to the network, nodes with higher IDs will perform SL
 - **pools:**
     - **p0:** int list; containing neighbor IDs

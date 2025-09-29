@@ -61,7 +61,7 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 
 # pylint: disable=line-too-long
-class topology_based_Avg(Strategy):
+class GLow_strategy(Strategy):
     """Decentralized Averaging strategy.
 
     Implementation based on https://arxiv.org/abs/2501.10463
@@ -117,6 +117,7 @@ class topology_based_Avg(Strategy):
         self,
         *,
         total_rounds: int,
+        aggregation: str,
         topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
@@ -137,7 +138,6 @@ class topology_based_Avg(Strategy):
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         early_local_train: Optional[bool] = False,
-        aggregation: str = 'score_neigh_params',
         run_id: str,
         num_classes: int,
         save_path: str
@@ -152,6 +152,7 @@ class topology_based_Avg(Strategy):
 
         self.total_rounds = total_rounds
         self.topology = topology
+        self.aggregation = aggregation
         self.fraction_fit = fraction_fit
         self.fraction_evaluate = fraction_evaluate
         self.min_fit_clients = min_fit_clients
@@ -167,7 +168,6 @@ class topology_based_Avg(Strategy):
         self.selected_pool = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
-        self.aggregation = 'score_neigh_params'
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
         self.run_id = run_id
@@ -242,7 +242,8 @@ class topology_based_Avg(Strategy):
             # Save the model
             torch.save(net.state_dict(), param_path + str(cli_ID) + '.pth')
 
-    #EVALUATE INPLACE WEIGHT AVG (SAME TESTSET)
+    
+    #EVALUATE INPLACE WEIGHT AVG (SAME COMMON TESTSET)
     #def evaluate(
     #    self, server_round: int, parameters: Parameters
     #) -> Optional[Tuple[float, Dict[str, Scalar]]]:

@@ -1,13 +1,15 @@
 run_name: '0'
-topology: './conf/topologies/custom_8_2.yaml'
+aggregation: 'score_neigh_params' #'inplace', 'score', 'score_neigh_params'
+topology: './conf/topologies/custom_16_2_cords.yaml'
+split_dataset: 'prepare_dataset_niid_train_iid_test' #'prepare_dataset_iid', 'prepare_dataset_niid_train', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: GPU
 early_local_train: False
-num_rounds: 1024
+num_rounds: 1920 #240
 # num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 # num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
 num_classes: 10 #10 output layer size
-balance_data: False
+#balance_data: False
 seed: 1999
 config_fit:
   lr: 0.0001

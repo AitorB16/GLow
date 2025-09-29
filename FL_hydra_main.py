@@ -40,9 +40,10 @@ def main(cfg: DictConfig):
 
     
     #2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloader, partitions = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
+    
     #3. DEFINE YOUR CLIENTS
     client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, device)
     cli_per_round = round(num_clients / 4)
@@ -56,7 +57,7 @@ def main(cfg: DictConfig):
         min_evaluate_clients = cli_per_round,
         min_available_clients=num_clients,
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
-        evaluate_fn=get_evaluate_fn(cfg.num_classes, testloader),
+        evaluate_fn=get_evaluate_fn(cfg.num_classes, testloaders),
         fit_metrics_aggregation_fn = cli_val_distr,
         evaluate_metrics_aggregation_fn = cli_eval_distr_results,
     )
@@ -110,6 +111,7 @@ def main(cfg: DictConfig):
     print(str(history.metrics_distributed))
     print('#################')
     print(str(history.metrics_centralized))
+    
     #print("--- %s seconds ---" % (time.time() - start_time))
     out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out = out + '\n\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
