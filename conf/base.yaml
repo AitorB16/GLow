@@ -1,7 +1,7 @@
 run_name: '0'
 aggregation: 'score_neigh_params' #'inplace', 'score', 'score_neigh_params'
-topology: './conf/topologies/custom_16_2_cords.yaml'
-split_dataset: 'prepare_dataset_niid_train_iid_test' #'prepare_dataset_iid', 'prepare_dataset_niid_train', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
+topology: './conf/topologies/custom_16_2.yaml'
+split_dataset: 'prepare_dataset_iid_train_iid_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: GPU
 early_local_train: False
 num_rounds: 1920 #240
