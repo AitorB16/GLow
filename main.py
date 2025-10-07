@@ -11,7 +11,7 @@ import numpy as np
 
 import yaml
 
-from dataset import prepare_dataset_iid, prepare_dataset_niid_train, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test, prepare_dataset_niid_class_partition
+from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test, prepare_dataset_niid_class_partition
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -46,10 +46,10 @@ def main():
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     # 2. PREAPRE YOUR DATASET
-    if cfg['split_dataset'] == 'prepare_dataset_iid':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
-    elif cfg['split_dataset'] == 'prepare_dataset_niid_train':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    if cfg['split_dataset'] == 'prepare_dataset_iid_train_common_test':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    elif cfg['split_dataset'] == 'prepare_dataset_niid_train_common_test':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_common_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_iid_test':
         trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_iid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
@@ -104,9 +104,9 @@ def main():
     )
 
     # 6. SAVE RESULTS
-    #results_path = save_path + run_id + "_results.pkl"
+    #params_path = save_path + run_id + "_results.pkl"
     #results = {"history": history, "anythingelse": "here"} 
-    #with open(str(results_path), "wb") as h:
+    #with open(str(params_path), "wb") as h:
     #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
     
     print('#################')

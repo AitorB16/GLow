@@ -14,7 +14,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 import yaml
 
-from dataset import prepare_dataset_iid
+from dataset import prepare_dataset_iid_train_common_test
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -40,7 +40,7 @@ def main(cfg: DictConfig):
 
     
     #2. PREAPRE YOUR DATASET
-    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+    trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
     device = cfg.device
     
@@ -95,10 +95,10 @@ def main(cfg: DictConfig):
     )
 
     #6. SAVE RESULTS
-    results_path = Path(save_path) / "results.pkl"
-    results = {"history": history, "anythingelse": "here"}    
-    with open(str(results_path), "wb") as h:
-        pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
+    #params_path = Path(save_path) / "results.pkl"
+    #results = {"history": history, "anythingelse": "here"}    
+    #with open(str(params_path), "wb") as h:
+    #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
 
    
     print('#################')

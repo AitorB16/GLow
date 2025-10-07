@@ -115,7 +115,12 @@ def main(cfg: DictConfig):
         client_resources={'num_cpus': 4, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
-    # 6. SAVE RESULTS    
+    # 6. SAVE RESULTS
+    #params_path = save_path + run_id + "_results.pkl"
+    #results = {"history": history, "anythingelse": "here"} 
+    #with open(str(params_path), "wb") as h:
+    #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
+
     print('#################')
     print(str(history.losses_distributed))
     print('#################')
