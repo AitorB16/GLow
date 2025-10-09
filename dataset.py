@@ -110,9 +110,12 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
                 tmp_part.append(data)
         ordered_testset.extend(tmp_part)
 
-
+    
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader, partition_len_train, [len(ordered_testset)]
+    testloaders = [testloader] * num_clients
+    ordered_testset = [len(ordered_testset)] * num_clients
+
+    return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
 def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
     # SEVERAL TRAIN SETS / COMMON TEST SET
@@ -192,9 +195,11 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
                 tmp_part.append(data)
         ordered_testset.extend(tmp_part)
 
-
     testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    return trainloaders, validationloaders, testloader, partition_len_train, [len(ordered_testset)]
+    testloaders = [testloader] * num_clients
+    ordered_testset = [len(ordered_testset)] * num_clients
+
+    return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
 def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
     """Load CIFAR-10 (training and test set)."""
