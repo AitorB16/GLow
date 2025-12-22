@@ -1,14 +1,14 @@
 # GLow - A Flower Based GL Strategy
-GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed systems using the **Flower Framework**. The implementation is able to simulate a fully decentraliced network composed by virtual network agents (disposed in different toplogies) that perform parameter aggregation with their neighbors. Modularity is an essential part of the system making the usage of different datasets, models and run configurations easy to integrate. Although the [Flower Framework](https://flower.ai/docs/framework/how-to-implement-strategies.html) guidelines for strategy implementation are followed, GLow differs from a vanilla FL scheme -- there is no aggregation server and each agent operates as client and server at the same time (P2P). Further explanations of the strategy are found in [GLow - A Novel, Flower-Based Simulated Gossip Learning Strategy](https://arxiv.org/abs/2501.10463) manuscript.
+GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed systems using the **Flower Framework**. The implementation is able to simulate a fully decentraliced network composed by virtual network agents (disposed in different toplogies) that perform parameter aggregation with their neighbors. Modularity is an essential part of the system making the usage of different datasets, models and run configurations easy to integrate. Although the [Flower Framework](https://flower.ai/docs/framework/how-to-implement-strategies.html) guidelines for strategy implementation are followed, GLow differs from a centralized FL scheme -- there is no aggregation server and each agent operates as client and server at the same time (P2P). Further explanations of the strategy are found in [GLow - A Novel, Flower-Based Simulated Gossip Learning Strategy](https://arxiv.org/abs/2501.10463) manuscript. Moreover, custom decentralized aggregation algorithms *ScoreAVG* and dynamic run time behavior customization are implemented -- nodes can go up/down or malicious (model poisoning) during simulation execution.
 
-Moreover, a centralized (CNL) and a vanilla Federated (FL) version of the system are provided as well; in order to have a wider testbench and give researchers a robust comparison baseline -- they are completely integrated with parts of GLow implementation and configuration.
+Moreover, a Centralized (CNL) and a Centralized Federated Learning (CFL) version of the system are provided as well; in order to have a wider testbench and give researchers a robust comparison baseline -- they are completely integrated with parts of GLow implementation and configuration.
 
 ## Directory structure
 - **conf (configuration files)**: YAML configuration files
-- **conf/topologies (topologies architecture)**: YAML files describing system topology
-- **custom_strategies**: Custom GLow strategy with vanilla FedAVG
+- **conf/topologies (topologies architecture and run time instructions)**: YAML files describing system topology and run time behavior
+- **custom_strategies**: Custom GLow strategy with *FedAVG* and *ScoreAVG* aggregation algorithms
 - **flwr_lib_modifications**: Updated files from internal Flower architecture
-- **visualization**: Notebooks to visualize GLow and vanilla FL outputs as well as topology architecture (graphs)
+- **visualization**: Notebooks to visualize GLow and centralized FL outputs as well as topology architecture (graphs)
 
 
 ## Dependencies
@@ -20,7 +20,6 @@ Built upon Flower v1.7.0.
 ## Dataset
 Download or create a custom dataset, the implementation is currently designed to work with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) which should be downloaded, extracted and placed into the [dataset](../dataset) directory.
 
-> Note: Other branches working with MNIST are available in the repository.
 ## Configuration files
 
 Configuration files in GLow are composed by a base file and a topology file.
@@ -32,6 +31,7 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
 - **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_neigh_params'*
 - **topology:** str; path to yaml file containing system topology
+- **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
 - **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*, *'prepare_dataset_niid_class_partition'*
 - **device:** str; select among *CPU*, *GPU*, *H100*
 - **early_local_train:** bool; to force the system work in SL for the first *n* communication rounds before neighbor aggregation 
@@ -81,7 +81,7 @@ A directory containing current date, time and all execution outputs is created b
 
 #### FL version
 
-Integration under Flower allows to easily switch among strategies; a vanilla FedAVG system working under the same configuration files is provided.
+Integration under Flower allows to easily switch among strategies; a centralized FedAVG system working under the same configuration files is provided.
 
 ```sh 
 python3 FL_hydra_main.py
@@ -92,7 +92,7 @@ python3 FL_hydra_main.py
 For experiments that involve multiple graphs; e.g., adding edges to an specific number of agents. Deployment is thought to be done using [mult_exp.sh](./mult_exp.sh) script, with topologies generated by [generate_topology.ipynb](./generate_topology.ipynb) and placed in [conf/topologies](./conf/topologies/) directory. Example [graph_8_2](./conf/topologies/graph_8_2/), contains 5 topologies with the same number of nodes and configurations, going from fully disconnected to fully connected graphs.
 
 ```sh
-sh mult_exp.sh main.py <conf_file.yaml> <run_name> <total number of topologies - 1>
+sh mult_exp.sh main.py <conf_file.yaml> <run_name> <total number of topologies - 1> <run_time_file.yaml>
 ```
 
 A directory named *run_name* is created in [outputs](./outputs/) to store execution results.
@@ -103,7 +103,7 @@ A directory named *run_name* is created in [outputs](./outputs/) to store execut
 Following the same structure of [mult_exp.sh](./mult_exp.sh), script [sing_run.sh](./sing_exp.sh) is provided for launching an specific inter-connectied graph generated by [generate_topology.ipynb](./generate_topology.ipynb).
 
 ```sh
-sh sing_exp.sh main.py <conf_file.yaml> <run_name> <specific topology ID>
+sh sing_exp.sh main.py <conf_file.yaml> <run_name> <specific topology ID> <run_time_file.yaml>
 ```
 > Note: Topology ID is an integer corresponding to the interconnection degree.
 
@@ -135,7 +135,10 @@ This section is oriented for visualization of the results obtained from *multipl
 
 ## Changes in libraries
 
-Dealing with control nodes with no local data is not a Flower feature. Performing weighted average among network parameters triggers scaling factors realted issues (division by 0). Hence, *aggregate_inplace()*  method of [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py) is modified. Scaling factor for nodes with no local data is set to 1.0 -- no scaling factor applied. 
+Dealing with control nodes with no local data is not a Flower feature. Performing weighted average among network parameters triggers scaling factors realted issues (division by 0). Hence, *aggregate_inplace()*  method of [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py) is modified. Scaling factor for nodes with no local data is set to 1.0 -- no scaling factor applied.
+Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *aggregate_score()*, *aggregate_score_neigh_params()*.
+
+If having problems with Ray Scalability (regarding dataset, python and ray versions), check [flwr/simulation/app.py](/flwr_lib_modifications/app.py).
 
 ## Author
 

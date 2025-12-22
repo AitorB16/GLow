@@ -1,9 +1,11 @@
 torch
 torchvision
-"flwr[simulation]==1.7.0"
 pandas
 pathlib
 pyyaml
 hydra-core
 omegaconf
 matplotlib
+scikit-learn
+flwr[simulation]==1.7.0
+setuptools==65.0.0

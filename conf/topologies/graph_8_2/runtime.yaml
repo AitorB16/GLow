@@ -1,0 +1,62 @@
+pools:
+  p0:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p1:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+
+  p2:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p3:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p4:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p5:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p6:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p7:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p8:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p9:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty

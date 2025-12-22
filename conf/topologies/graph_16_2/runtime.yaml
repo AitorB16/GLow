@@ -1,0 +1,123 @@
+pools:
+  p0:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p1:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+
+  p2:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p3:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p4:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p5:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p6:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p7:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p8:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p9:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p10:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p11:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+
+  p12:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p13:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p14:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p15:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p16:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p17:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p18:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  p19:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty

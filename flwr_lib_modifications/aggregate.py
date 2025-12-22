@@ -118,11 +118,11 @@ def aggregate_score_neigh_params(results: List[Tuple[ClientProxy, FitRes]], neig
     """Compute score weighted average."""
 
     neighbour_metrics_cpy = neighbour_metrics.copy()
-    neighbours_cpy = neighbours.copy()
+    #neighbours_cpy = neighbours.copy()
 
     #Remove head
     neighbour_metrics_cpy.pop()
-    neighbours_cpy.pop()
+    #neighbours_cpy.pop()
 
     # Count total examples
     scaling_norm = sum(fit_res.metrics['acc_val_distr'] for (_, fit_res) in results if fit_res.metrics['acc_val_distr'] is not None) #Just head is not None

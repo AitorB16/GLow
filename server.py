@@ -20,6 +20,7 @@ def get_on_fit_config(config):
 def get_evaluate_fn(num_classes: int, testloaders):
 
     def evaluate_fn(sid: int, server_round: int, parameters, config): #int nparrays, dict
+        torch.manual_seed(config['seed'])
         
         model = LeNet(num_classes)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,29 +29,7 @@ def get_evaluate_fn(num_classes: int, testloaders):
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         model.load_state_dict(state_dict, strict=True)
 
-        loss, accuracy = test(model, testloaders[sid], num_classes, device) #global model
+        loss, accuracy = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
         return loss, {'acc_cntrl': accuracy}
 
     return evaluate_fn
-
-#def get_evaluate_fn_param_prop(num_classes: int, testloaders):
-#
-#    def evaluate_fn_param_prop(sid: int, server_round: int, parameters, config, neighbours): #int nparrays, dict
-#        losses = []
-#        accuracies = []
-#
-#        for n in neighbours:
-#            model = LeNet(num_classes)
-#            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#
-#            params_dict = zip(model.state_dict().keys(), parameters[n])
-#            state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
-#            model.load_state_dict(state_dict, strict=True)
-#
-#            loss, accuracy = test(model, testloaders[sid], num_classes, device) #global model
-#            losses.append(loss)
-#            accuracies.append({'acc_cntrl': accuracy})
-#
-#        return losses, accuracies
-#
-#    return evaluate_fn_param_prop

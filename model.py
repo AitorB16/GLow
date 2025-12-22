@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 # Note the model and functions here defined do not have any FL-specific components.
 
@@ -46,9 +47,8 @@ class LeNet(nn.Module):
       x = self.fc2(x)
       return x
     
-def train(net, trainloader, validationloader, optimizer, epochs, num_classes, device: str):
+def train(net, trainloader, validationloader, optimizer, epochs, num_classes, nature, device):
     """Train the network on the training set.
-
     This is a fairly simple training loop for PyTorch.
     """
     # TRAIN
@@ -59,6 +59,10 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, de
     for _ in range(epochs):
         loss_sum = 0.
         for inputs, labels in trainloader: #INPUTS ARE TUPLES OF DATABASE
+            if nature == 'malicious': #FLIP LABEL
+                torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
+                #mapping = torch.tensor(np.random.randint(10, size=10))
+                labels = mapping[labels]
             inputs, labels = inputs.to(device), labels.to(device)
             loss = criterion(net(inputs), labels)
             loss.backward()
@@ -75,6 +79,10 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, de
     correct, total_size, valid_loss = 0, 0, 0.0
     net.eval()     # Optional when not using Model Specific layer
     for inputs, labels in validationloader:
+        if nature == 'malicious': #FLIP LABEL
+                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
+                #mapping = torch.tensor(np.random.randint(10, size=10))
+                labels = mapping[labels]
         # Transfer Data to GPU if available
         inputs, labels = inputs.to(device), labels.to(device)
         # Forward Pass
@@ -91,7 +99,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, de
 
     return train_loss, metrics_val_distributed_fit
 
-def test(net, testloader, num_classes, device: str):
+def test(net, testloader, num_classes, nature, device):
     """Validate the network on the entire test set.
     and report loss and accuracy.
     """
@@ -101,6 +109,10 @@ def test(net, testloader, num_classes, device: str):
     net.to(device)
     with torch.no_grad():
         for inputs, labels in testloader:
+            if nature == 'malicious': #FLIP LABEL
+                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
+                #mapping = torch.tensor(np.random.randint(10, size=10))
+                labels = mapping[labels]
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = net(inputs)
             loss += criterion(outputs, labels).item()

@@ -39,6 +39,9 @@ def get_cifar10(data_path: str = "..datasets"):
 
 
 def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
     # SEVERAL TRAIN SETS / COMMON TEST SET
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
@@ -118,6 +121,9 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
     return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
 def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+    
     # SEVERAL TRAIN SETS / COMMON TEST SET
     """Load CIFAR-10 (training and test-set). DIRICHLET"""
     trainset, testset = get_cifar10()
@@ -141,9 +147,7 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
         ordered_trainset.extend(tmp_part)
 
     # SPLIT DIRICHLET DISTRIBUTION
-    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
-
-    np.random.seed(seed=seed)
+    alpha = [20., 1., 1., 2., 2., 1., 1., 20. ]
     dirich = np.random.dirichlet(alpha)
     
     partition_len_train = [0] * num_clients
@@ -202,6 +206,9 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
     return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
 def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
 
@@ -301,6 +308,9 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
 
 
 def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
     """Load CIFAR-10 (training and test set). DIRICHLET"""
     trainset, testset = get_cifar10()
 
@@ -329,8 +339,6 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     #alpha = [1., 1., 1., 20., 1., 1., 1., 40., 40., 1., 1., 1., 20., 1., 1., 1. ]
     #alpha = [1., 1., 1., 20., 1., 1., 1., 60., 60., 1., 1., 1., 1., 100., 1., 1. ]
     #alpha = [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1. ]
-
-    np.random.seed(seed=seed)
     #dirich = np.random.dirichlet([alpha]*len(clients_with_data))
     dirich = np.random.dirichlet(alpha)
     
@@ -412,6 +420,9 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
 
 
 def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
     """Load CIFAR-10 (training and test set). DIRICHLET"""
     trainset, testset = get_cifar10()
 
@@ -435,8 +446,6 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
 
     # SPLIT DIRICHLET DISTRIBUTION
     alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
-    
-    np.random.seed(seed=seed)
     dirich = np.random.dirichlet(alpha)
     
     partition_len_train = [0] * num_clients
@@ -518,6 +527,9 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
 
 
 def prepare_dataset_niid_class_partition(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+    
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
     clients_with_data = []
@@ -595,6 +607,9 @@ def prepare_dataset_niid_class_partition(num_clients: int, num_classes: int, cli
 
 
 def prepare_dataset_cnl(batch_size: int, seed: int, val_ratio: float = 0.1):
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
     """Load CIFAR-10 (training and test set)."""
     trainset, testset = get_cifar10()
     num_total = len(trainset)

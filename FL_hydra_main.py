@@ -25,6 +25,7 @@ from custom_strategies.fedavg import FedAvg
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
 def main(cfg: DictConfig):
+    
     #1. LOAD CONFIGURATION
     start_time = time.time()
     print(OmegaConf.to_yaml(cfg))

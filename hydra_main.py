@@ -26,6 +26,7 @@ from custom_strategies.GLow_strategy import GLow_strategy
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
 def main(cfg: DictConfig):
+    np.random.seed(cfg.seed)
     
     # 1. LOAD CONFIGURATION AND TOPOLOGY
     start_time = time.time()
@@ -43,6 +44,24 @@ def main(cfg: DictConfig):
     for cli_ID in vcid:
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
+    with open(cfg.runtime, 'r') as file:
+        runtime = yaml.safe_load(file)
+    
+    #Runtime options
+    pool_switch_down = []
+    pool_switch_up = []
+    pool_status = []
+    pool_nature = []
+    pool_switch_malicious = []
+    for i in range(num_clients):
+        client_runtime = runtime['pools']['p'+str(i)]
+        pool_switch_down.append(client_runtime['down'])
+        pool_switch_up.append(client_runtime['up'])
+        pool_switch_malicious.append(client_runtime['malicious'])
+        pool_status.append(client_runtime['status'])
+        pool_nature.append(client_runtime['nature'])
+
+
     # 2. PREAPRE YOUR DATASET
     if cfg.split_dataset == 'prepare_dataset_iid_train_common_test':
         trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
@@ -57,12 +76,10 @@ def main(cfg: DictConfig):
     elif cfg.split_dataset == 'prepare_dataset_niid_class_partition':
         trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_class_partition(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
 
-
-
     device = cfg.device
     
     # 3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, device)
+    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, cfg.seed, device)
 
     # 4. DEFINE A STRATEGY
     strategy = GLow_strategy(
@@ -79,6 +96,12 @@ def main(cfg: DictConfig):
         run_id = run_id,
         early_local_train = cfg.early_local_train,
         num_classes=cfg.num_classes,
+        pool_switch_down=pool_switch_down,
+        pool_switch_up=pool_switch_up,
+        pool_switch_malicious=pool_switch_malicious,
+        pool_status=pool_status,
+        pool_nature=pool_nature,
+        seed = cfg.seed,
         save_path = save_path
     )
 
@@ -99,12 +122,12 @@ def main(cfg: DictConfig):
     server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
 
     # Divide GPU resources among agents (very high level)
-    if device == 'GPU' or device == 'H100':
+    if device == 'GPU':
         num_gpus = 1.0/tplgy['max_num_clients_per_round']
     else:
         num_gpus = 0.
 
-    # 5. RUN SIMULATIONS
+   # 5. RUN SIMULATIONS
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=num_clients,

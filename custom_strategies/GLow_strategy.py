@@ -140,6 +140,13 @@ class GLow_strategy(Strategy):
         early_local_train: Optional[bool] = False,
         run_id: str,
         num_classes: int,
+        #pool_total_rounds: int, 
+        pool_switch_down: List[List[int]],
+        pool_switch_up: List[List[int]],
+        pool_switch_malicious: List[List[int]],
+        pool_status: List[str],
+        pool_nature: List[str],
+        seed: int,
         save_path: str
     ) -> None:
         super().__init__()
@@ -151,6 +158,7 @@ class GLow_strategy(Strategy):
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
         self.total_rounds = total_rounds
+        self.current_round = 0 #REPLACE BY server_round
         self.topology = topology
         self.aggregation = aggregation
         self.fraction_fit = fraction_fit
@@ -172,6 +180,7 @@ class GLow_strategy(Strategy):
         self.pool_losses = [None] * self.min_available_clients
         self.run_id = run_id
         self.num_classes = num_classes
+        self.seed = seed
         self.save_path = save_path
         self.early_local_train = early_local_train
         
@@ -181,6 +190,50 @@ class GLow_strategy(Strategy):
             self.neigh_metrics.append([])
             for j in topology[i]:
                 self.neigh_metrics[i].append(None)
+
+        # CREATE STRUCTURE TO STORE RUNTIME INFO 
+        self.pool_switch_down = pool_switch_down
+        self.pool_switch_up = pool_switch_up
+        self.pool_switch_malicious = pool_switch_malicious
+        self.pool_status = pool_status
+        self.pool_nature = pool_nature
+
+    def get_up_neighbors(self):
+        neighbors = self.topology[self.selected_pool]
+        up_neighbors = []
+        for neighbor in neighbors:
+            if self.pool_status[neighbor] == 'up':
+                up_neighbors.append(neighbor)
+        return up_neighbors
+
+    def pool_check(self):
+        for agent in self.client_list:
+            if self.pool_switch_up[agent] is not None:
+                if self.current_round in self.pool_switch_up[agent]:
+                    self.pool_status[agent] = 'up'
+            if self.pool_switch_down[agent] is not None:
+                if self.current_round in self.pool_switch_down[agent]:
+                    self.pool_status[agent] = 'down'
+            if self.pool_switch_malicious[agent] is not None:
+                if self.current_round in self.pool_switch_malicious[agent]:
+                    self.pool_nature[agent] = 'malicious'
+                    self.topology[agent] = [agent] #STOP RECEIVING INFO FROM NETWORK
+                    self.pool_metrics[agent] = None
+                    self.pool_losses[agent] = None
+                    self.neigh_metrics[agent] = [None]
+                    self.pool_parameters[agent] = self.initial_parameters[agent]
+    
+    def select_pool(self):
+        search = True
+        while search: #POSSIBLE ISSUE IF ALL AGENTS DOWN, AT LEAST 1 UP
+            self.selected_pool = self.client_list[0]
+            self.pool_check()
+            if self.pool_status[self.selected_pool] == 'up':
+                search = False
+            else:
+                self.client_list = np.roll(self.client_list, -1).tolist() #pick first rotate list
+        self.client_list = np.roll(self.client_list, -1).tolist() #roll list for next rounds
+        self.current_round += 1
 
     def __repr__(self) -> str:
         """Compute a string representation of the strategy."""
@@ -218,8 +271,8 @@ class GLow_strategy(Strategy):
                 self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=None).parameters
                 self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
         
-        initial_parameters = self.initial_parameters[0] #Params from first pool for initialization
-        self.selected_pool = 0
+        self.select_pool()
+        initial_parameters = self.initial_parameters[self.selected_pool]
         return initial_parameters
 
     def save_results(self):
@@ -242,32 +295,6 @@ class GLow_strategy(Strategy):
             # Save the model
             torch.save(net.state_dict(), param_path + str(cli_ID) + '.pth')
 
-    
-    #EVALUATE INPLACE WEIGHT AVG (SAME COMMON TESTSET)
-    #def evaluate(
-    #    self, server_round: int, parameters: Parameters
-    #) -> Optional[Tuple[float, Dict[str, Scalar]]]:
-    #    """Evaluate model parameters using an evaluation function."""
-    #    if self.evaluate_fn is None:
-    #        # No evaluation function provided
-    #        return None
-    #    parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool]) #GET CUSTOM PARAMS
-    #    eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, {}) #CALL CUSTOM FUNC
-    #    if eval_res is None:
-    #        return None
-    #    loss, metrics = eval_res
-    #
-    #    # Track each pool metrics and results
-    #    self.pool_losses[self.selected_pool] = loss
-    #    self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
-    #    
-    #    # Save pool results and parameters in last rounds
-    #    if server_round == self.total_rounds:
-    #        self.save_results()
-    #
-    #    return loss, metrics
-
-
     #EVALUATE PARAM PROPAGATION NEIGH (INDEPENDENT TESTSETS)
     def evaluate(
         self, server_round: int, parameters: Parameters
@@ -278,16 +305,16 @@ class GLow_strategy(Strategy):
             # No evaluation function provided
             return None
         
-        n = 0
-        for neighbour in self.topology[self.selected_pool]:
+        for neighbour in self.get_up_neighbors():
             parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
-            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, {}) #CALL CUSTOM FUNC
+            config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
+            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
             
             if eval_res is None:
                 return None
             
             loss, metrics = eval_res
-            self.neigh_metrics[self.selected_pool][n] = metrics['acc_cntrl']
+            self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
 
             # Track each pool metrics and results
             if neighbour == self.selected_pool:
@@ -295,7 +322,6 @@ class GLow_strategy(Strategy):
                 self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
                 head_loss = loss
                 head_metrics = metrics
-            n+=1
         
         # Save pool results and parameters in last rounds
         if server_round == self.total_rounds:
@@ -307,8 +333,8 @@ class GLow_strategy(Strategy):
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, FitIns]]:
         
-        self.selected_pool = self.client_list[0] #pick first rotate list
-        self.client_list = np.roll(self.client_list, -1).tolist()
+        #self.pool_check()
+        self.select_pool()
 
 
         '''Implementing abstract class'''
@@ -318,18 +344,13 @@ class GLow_strategy(Strategy):
             def select(self, client: ClientProxy) -> bool:
                 return client.cid in self.cid_list
 
-        # Sample clients
-        sample_size, min_num_clients = self.num_fit_clients(
-            client_manager.num_available()
-        )
-
-        connections = self.topology[self.selected_pool]
+        connections = self.get_up_neighbors()
 
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
+            num_clients=len(connections), criterion=select_criterion(connections)
         )
 
-        # SORT CLIENTS FOR FUTURE AGGREGATIONS
+        # SORT CLIENTS FOR FUTURE AGGREGATIONS -- DEPRECATED??
         sorted_clients = []
         for neigh in connections:
             for client in clients:
@@ -338,15 +359,18 @@ class GLow_strategy(Strategy):
 
         
         """Configure the next round of training."""
-        config = {}
-        if self.on_fit_config_fn is not None:
-            # Custom fit config function provided
-            config = self.on_fit_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
-            config['comm_round'] = server_round
-            config['num_nodes'] = self.min_available_clients
         pairs = []
         for client in sorted_clients:
+            config = {}
+            if self.on_fit_config_fn is not None:
+                # Custom fit config function provided
+                config = self.on_fit_config_fn(server_round)
+            config['local_train_cid'] = self.selected_pool
+            config['comm_round'] = server_round
+            config['num_agents'] = self.min_available_clients
+            config['nature'] = self.pool_nature[self.selected_pool]
+            config['seed'] = self.seed
+
             fit_ins = FitIns(self.pool_parameters[client.cid], config)
             pairs.append((client, fit_ins))
 
@@ -368,21 +392,11 @@ class GLow_strategy(Strategy):
         # Do not configure federated evaluation if fraction eval is 0.
         if self.fraction_evaluate == 0.0:
             return []
-
-        # Sample clients
-        sample_size, min_num_clients = self.num_evaluation_clients(
-            client_manager.num_available()
-        )
-
-        # Sample clients
-        sample_size, min_num_clients = self.num_fit_clients(
-            client_manager.num_available()
-        )
         
-        connections = self.topology[self.selected_pool]
+        connections = self.get_up_neighbors()
 
         clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients, criterion=select_criterion(connections)
+            num_clients=len(connections), criterion=select_criterion(connections)
         )
 
         # SORT CLIENTS FOR FUTURE AGGREGATIONS
@@ -393,14 +407,17 @@ class GLow_strategy(Strategy):
                     sorted_clients.append(client)
 
         # Parameters and config
-        config = {}
-        if self.on_evaluate_config_fn is not None:
-            # Custom fit config function provided
-            config = self.on_evaluate_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
         pairs = []
         for client in sorted_clients:
-            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
+            config = {}
+            if self.on_evaluate_config_fn is not None:
+                # Custom fit config function provided
+                config = self.on_evaluate_config_fn(server_round)
+            config['local_train_cid'] = self.selected_pool
+            config['nature'] = self.pool_nature[self.selected_pool]
+            config['seed'] = self.seed
+
+            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config) #POSIBLEMENTE FALLO ESTE AQUI
             pairs.append((client, evaluate_ins))
         # Return client/config pairs
         return pairs 
@@ -419,20 +436,31 @@ class GLow_strategy(Strategy):
         if not self.accept_failures and failures:
             return None, {}
 
-        #Don't aggregate other pool mates in first rounds
-        #if self.early_local_train and server_round <= self.min_available_clients:
-        #    for client, fit_res in results:
-        #        if client.cid != self.selected_pool:
-        #            fit_res.num_examples = 0
 
-        if self.aggregation == 'score':
-            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.topology[self.selected_pool], self.selected_pool)
-        elif self.aggregation == 'score_neigh_params':
-            aggregated_ndarrays = aggregate_score_neigh_params(results, self.neigh_metrics[self.selected_pool], self.topology[self.selected_pool], self.selected_pool)
-        elif self.aggregation == 'inplace':
-            # Does in-place weighted average of results
-            '''Detect if results are 0'''
+        ######CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME######
+        for neighbour in self.get_up_neighbors():
+            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
+            config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
+            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
+        
+        if eval_res is None:
+            return None
+        
+        loss, metrics = eval_res
+        self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
+        # Track each pool metrics and results
+        if neighbour == self.selected_pool:
+            self.pool_losses[self.selected_pool] = loss
+            self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+        #############################################################
+
+
+        if self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results)
+        elif self.aggregation == 'score':
+            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool)
+        elif self.aggregation == 'score_neigh_params':
+            aggregated_ndarrays = aggregate_score_neigh_params(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool)
         else:
             # Does weighted average of results
             weights_results = [
