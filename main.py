@@ -80,7 +80,7 @@ def main():
     device = cfg['device']
 
     # 3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg['num_classes'], device)
+    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg['num_classes'], cfg['seed'], device)
 
 
     # 4. DEFINE A STRATEGY

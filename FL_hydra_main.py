@@ -46,7 +46,7 @@ def main(cfg: DictConfig):
     device = cfg.device
     
     #3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, device)
+    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, cfg.seed, device)
     cli_per_round = round(num_clients / 4)
 
 
