@@ -77,87 +77,50 @@ def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
 
 def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
     """Compute score weighted average."""
-    neighbours_cpy = neighbours.copy()
-    neighbours_cpy.remove(head_id)
 
-    # Count total examples
-    scaling_norm = sum(fit_res.metrics['acc_val_distr'] for (_, fit_res) in results if fit_res.metrics['acc_val_distr'] is not None)
-    for id in neighbours_cpy:
-        if neighbour_metrics[id] is not None:
-            scaling_norm += neighbour_metrics[id]
+    ordered_results = []
+    for n in neighbours:
+        for i, (cli, fit_res) in enumerate(results):
+            if n == cli.cid:
+                #print(neighbours)
+                #print(cli.cid)
+                ordered_results.append(results[i])
+        
+    scaling_norm = 0.
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
+            scaling_norm += fit_res.metrics['acc_val_distr']
+        else:
+            if neighbour_metrics[i] is not None:
+                scaling_norm += neighbour_metrics[i]
 
     # AVOID DIVISION BY 0
     if scaling_norm == 0:
         scaling_norm = 1.0
 
     scaling_factors = []
-    for _, fit_res in results: 
-        if fit_res.metrics['acc_val_distr'] is not None:
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
             scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
         else:
-            neighbour = neighbour_metrics[neighbours_cpy.pop()]
-            if neighbour is not None:
-                scaling_factors.append(neighbour / scaling_norm)
+            if neighbour_metrics[i] is not None:
+                scaling_factors.append(neighbour_metrics[i] / scaling_norm)
             else:
                 scaling_factors.append(0.)
 
     # Let's do in-place aggregation
     # Get first result, then add up each other
+
     params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)
+        scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
-    for i, (_, fit_res) in enumerate(results[1:]):
-        res = (
-            scaling_factors[i + 1] * x
-            for x in parameters_to_ndarrays(fit_res.parameters)
-        )
-        params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
-    return params
-
-def aggregate_score_neigh_params(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
-    """Compute score weighted average."""
-
-    neighbour_metrics_cpy = neighbour_metrics.copy()
-    #neighbours_cpy = neighbours.copy()
-
-    #Remove head
-    neighbour_metrics_cpy.pop()
-    #neighbours_cpy.pop()
-
-    # Count total examples
-    scaling_norm = sum(fit_res.metrics['acc_val_distr'] for (_, fit_res) in results if fit_res.metrics['acc_val_distr'] is not None) #Just head is not None
     
-    for metric in neighbour_metrics_cpy:
-        if metric is not None:
-            scaling_norm += metric
-
-    # AVOID DIVISION BY 0
-    if scaling_norm == 0:
-        scaling_norm = 1.0
-
-    scaling_factors = []
-    for _, fit_res in results: 
-        if fit_res.metrics['acc_val_distr'] is not None:
-            scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
-        else:
-            #metrics = neighbour_metrics_cpy[neighbours_cpy.pop()]
-            metrics = neighbour_metrics_cpy.pop()
-            if metrics is not None:
-                scaling_factors.append(metrics / scaling_norm)
-            else:
-                scaling_factors.append(0.)
-
-    # Let's do in-place aggregation
-    # Get first result, then add up each other
-    params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)
-    ]
-    for i, (_, fit_res) in enumerate(results[1:]):
+    for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
-            scaling_factors[i + 1] * x
-            for x in parameters_to_ndarrays(fit_res.parameters)
+            scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
+    
     return params
 
 

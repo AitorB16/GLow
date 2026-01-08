@@ -44,7 +44,7 @@ from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
-from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_neigh_params, aggregate_median, weighted_loss_avg
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -373,7 +373,6 @@ class GLow_strategy(Strategy):
 
             fit_ins = FitIns(self.pool_parameters[client.cid], config)
             pairs.append((client, fit_ins))
-
         # Return client/config pairs
         return pairs
 
@@ -458,9 +457,9 @@ class GLow_strategy(Strategy):
         if self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results)
         elif self.aggregation == 'score':
-            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool)
+            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool) #Trust pairs
         elif self.aggregation == 'score_neigh_params':
-            aggregated_ndarrays = aggregate_score_neigh_params(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool)
+            aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
         else:
             # Does weighted average of results
             weights_results = [

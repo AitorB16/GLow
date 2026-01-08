@@ -1,7 +1,7 @@
 run_name: '0'
 aggregation: 'score_neigh_params' #'inplace', 'score', 'score_neigh_params'
-topology: './conf/topologies/poison_example/ring_8.yaml'
-runtime: './conf/topologies/poison_example/ring_8_runtime.yaml'
+topology: './conf/topologies/poison_example/custom_8_2.yaml'
+runtime: './conf/topologies/poison_example/custom_8_2_runtime.yaml'
 split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: CPU
 early_local_train: False
