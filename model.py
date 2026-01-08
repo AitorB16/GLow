@@ -60,7 +60,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
         loss_sum = 0.
         for inputs, labels in trainloader: #INPUTS ARE TUPLES OF DATABASE
             if nature == 'malicious': #FLIP LABEL
-                torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
+                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
                 #mapping = torch.tensor(np.random.randint(10, size=10))
                 labels = mapping[labels]
             inputs, labels = inputs.to(device), labels.to(device)
