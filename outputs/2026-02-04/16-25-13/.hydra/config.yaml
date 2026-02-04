@@ -1,0 +1,15 @@
+run_name: '0'
+aggregation: score_neigh_params
+topology: ./conf/topologies/poison_example/custom_8_2.yaml
+runtime: ./conf/topologies/poison_example/custom_8_2_runtime.yaml
+split_dataset: prepare_dataset_iid_train_common_test
+device: CPU
+early_local_train: false
+num_rounds: 1024
+batch_size: 128
+num_classes: 10
+seed: 1999
+config_fit:
+  lr: 0.0001
+  momentum: 0.9
+  local_epochs: 32

@@ -1,4 +1,4 @@
-''' PATH: .venv/lib/python3.10/site-packages/flwr/server/strategy/aggregate.py'''
+"""PATH: .venv/lib/python3.10/site-packages/flwr/server/strategy/aggregate.py"""
 
 # Copyright 2020 Flower Labs GmbH. All Rights Reserved.
 #
@@ -21,7 +21,6 @@ from functools import reduce
 from typing import Any, Callable, List, Tuple
 
 import numpy as np
-
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from flwr.server.client_proxy import ClientProxy
 
@@ -32,14 +31,11 @@ def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     num_examples_total = sum(num_examples for (_, num_examples) in results)
 
     # Create a list of weights, each multiplied by the related number of examples
-    weighted_weights = [
-        [layer * num_examples for layer in weights] for weights, num_examples in results
-    ]
+    weighted_weights = [[layer * num_examples for layer in weights] for weights, num_examples in results]
 
     # Compute average weights of each layer
     weights_prime: NDArrays = [
-        reduce(np.add, layer_updates) / num_examples_total
-        for layer_updates in zip(*weighted_weights)
+        reduce(np.add, layer_updates) / num_examples_total for layer_updates in zip(*weighted_weights)
     ]
     return weights_prime
 
@@ -48,48 +44,40 @@ def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
     """Compute in-place weighted average."""
     # Count total examples
     num_examples_total = sum(fit_res.num_examples for (_, fit_res) in results)
-    
+
     # DETECT IF IS GREATER THAN 0 (i.e., NODE HAS LOCAL INSTANCES) AVOID DIVISION BY 0 (ISLANDS)
     if num_examples_total > 0:
-    
-    # Compute scaling factors for each result
-        scaling_factors = [
-            fit_res.num_examples / num_examples_total for _, fit_res in results
-        ]
+        # Compute scaling factors for each result
+        scaling_factors = [fit_res.num_examples / num_examples_total for _, fit_res in results]
     else:
-        scaling_factors = [
-            1. for _, fit_res in results
-        ]
+        scaling_factors = [1.0 for _, fit_res in results]
 
     # Let's do in-place aggregation
     # Get first result, then add up each other
-    params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)
-    ]
+    params = [scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)]
     for i, (_, fit_res) in enumerate(results[1:]):
-        res = (
-            scaling_factors[i + 1] * x
-            for x in parameters_to_ndarrays(fit_res.parameters)
-        )
+        res = (scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters))
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
     return params
 
 
-def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
+def aggregate_score(
+    results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int
+) -> NDArrays:
     """Compute score weighted average."""
 
     ordered_results = []
     for n in neighbours:
         for i, (cli, fit_res) in enumerate(results):
             if n == cli.cid:
-                #print(neighbours)
-                #print(cli.cid)
+                # print(neighbours)
+                # print(cli.cid)
                 ordered_results.append(results[i])
-        
-    scaling_norm = 0.
+
+    scaling_norm = 0.0
     for i, (cli, fit_res) in enumerate(ordered_results):
         if cli.cid == head_id:
-            scaling_norm += fit_res.metrics['acc_val_distr']
+            scaling_norm += fit_res.metrics["acc_val_distr"]
         else:
             if neighbour_metrics[i] is not None:
                 scaling_norm += neighbour_metrics[i]
@@ -101,26 +89,22 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
     scaling_factors = []
     for i, (cli, fit_res) in enumerate(ordered_results):
         if cli.cid == head_id:
-            scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
+            scaling_factors.append(fit_res.metrics["acc_val_distr"] / scaling_norm)
         else:
             if neighbour_metrics[i] is not None:
                 scaling_factors.append(neighbour_metrics[i] / scaling_norm)
             else:
-                scaling_factors.append(0.)
+                scaling_factors.append(0.0)
 
     # Let's do in-place aggregation
     # Get first result, then add up each other
 
-    params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
-    ]
-    
+    params = [scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)]
+
     for i, (_, fit_res) in enumerate(ordered_results[1:]):
-        res = (
-            scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters)
-        )
+        res = (scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters))
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
-    
+
     return params
 
 
@@ -130,15 +114,11 @@ def aggregate_median(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     weights = [weights for weights, _ in results]
 
     # Compute median weight of each layer
-    median_w: NDArrays = [
-        np.median(np.asarray(layer), axis=0) for layer in zip(*weights)
-    ]
+    median_w: NDArrays = [np.median(np.asarray(layer), axis=0) for layer in zip(*weights)]
     return median_w
 
 
-def aggregate_krum(
-    results: List[Tuple[NDArrays, int]], num_malicious: int, to_keep: int
-) -> NDArrays:
+def aggregate_krum(results: List[Tuple[NDArrays, int]], num_malicious: int, to_keep: int) -> NDArrays:
     """Choose one parameter vector according to the Krum function.
 
     If to_keep is not None, then MultiKrum is applied.
@@ -159,10 +139,7 @@ def aggregate_krum(
 
     # Compute the score for each client, that is the sum of the distances
     # of the n-f-2 closest parameters vectors
-    scores = [
-        np.sum(distance_matrix[i, closest_indices[i]])
-        for i in range(len(distance_matrix))
-    ]
+    scores = [np.sum(distance_matrix[i, closest_indices[i]]) for i in range(len(distance_matrix))]
 
     if to_keep > 0:
         # Choose to_keep clients and return their average (MultiKrum)
@@ -217,9 +194,7 @@ def aggregate_bulyan(
     beta = theta - 2 * num_malicious
 
     for _ in range(theta):
-        best_model = aggregation_rule(
-            results=results, num_malicious=num_malicious, **aggregation_rule_kwargs
-        )
+        best_model = aggregation_rule(results=results, num_malicious=num_malicious, **aggregation_rule_kwargs)
         list_of_weights = [weights for weights, num_samples in results]
         # This group gives exact result
         if aggregation_rule in byzantine_resilient_single_ret_model_aggregation:
@@ -250,9 +225,7 @@ def aggregate_bulyan(
 
     # Take the averaged beta parameters of the closest distance to the median
     # (coordinate-wise)
-    parameters_aggregated = _aggregate_n_closest_weights(
-        median_vect, selected_models_set, beta_closest=beta
-    )
+    parameters_aggregated = _aggregate_n_closest_weights(median_vect, selected_models_set, beta_closest=beta)
     return parameters_aggregated
 
 
@@ -265,9 +238,7 @@ def weighted_loss_avg(results: List[Tuple[int, float]]) -> float:
     return sum(weighted_losses) / num_total_evaluation_examples
 
 
-def aggregate_qffl(
-    parameters: NDArrays, deltas: List[NDArrays], hs_fll: List[NDArrays]
-) -> NDArrays:
+def aggregate_qffl(parameters: NDArrays, deltas: List[NDArrays], hs_fll: List[NDArrays]) -> NDArrays:
     """Compute weighted average based on Q-FFL paper."""
     demominator: float = np.sum(np.asarray(hs_fll))
     scaled_deltas = []
@@ -320,17 +291,12 @@ def _trim_mean(array: NDArray, proportiontocut: float) -> NDArray:
     return result
 
 
-def aggregate_trimmed_avg(
-    results: List[Tuple[NDArrays, int]], proportiontocut: float
-) -> NDArrays:
+def aggregate_trimmed_avg(results: List[Tuple[NDArrays, int]], proportiontocut: float) -> NDArrays:
     """Compute trimmed average."""
     # Create a list of weights and ignore the number of examples
     weights = [weights for weights, _ in results]
 
-    trimmed_w: NDArrays = [
-        _trim_mean(np.asarray(layer), proportiontocut=proportiontocut)
-        for layer in zip(*weights)
-    ]
+    trimmed_w: NDArrays = [_trim_mean(np.asarray(layer), proportiontocut=proportiontocut) for layer in zip(*weights)]
 
     return trimmed_w
 
@@ -340,14 +306,11 @@ def _check_weights_equality(weights1: NDArrays, weights2: NDArrays) -> bool:
     if len(weights1) != len(weights2):
         return False
     return all(
-        np.array_equal(layer_weights1, layer_weights2)
-        for layer_weights1, layer_weights2 in zip(weights1, weights2)
+        np.array_equal(layer_weights1, layer_weights2) for layer_weights1, layer_weights2 in zip(weights1, weights2)
     )
 
 
-def _find_reference_weights(
-    reference_weights: NDArrays, list_of_weights: List[NDArrays]
-) -> int:
+def _find_reference_weights(reference_weights: NDArrays, list_of_weights: List[NDArrays]) -> int:
     """Find the reference weights by looping through the `list_of_weights`.
 
     Raise Error if the reference weights is not found.
@@ -415,8 +378,6 @@ def _aggregate_n_closest_weights(
         indices = np.argpartition(diff_np, kth=beta_closest - 1, axis=0)
         # Take the weights (coordinate-wise) corresponding to the beta of the
         # closest distances
-        beta_closest_weights = np.take_along_axis(
-            other_weights_layer_np, indices=indices, axis=0
-        )[:beta_closest]
+        beta_closest_weights = np.take_along_axis(other_weights_layer_np, indices=indices, axis=0)[:beta_closest]
         aggregated_weights.append(np.mean(beta_closest_weights, axis=0))
     return aggregated_weights
