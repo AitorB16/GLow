@@ -18,15 +18,13 @@ Manuscript: ###############
 """
 
 import os
-import flwr
-import numpy as np
 from collections import OrderedDict
-import torch
-from model import LeNet
-
-from logging import WARNING, INFO
+from logging import INFO, WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+import flwr
+import numpy as np
+import torch
 from flwr.common import (
     EvaluateIns,
     EvaluateRes,
@@ -39,18 +37,19 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
-
 from flwr.common.logger import log
+from flwr.common.typing import GetParametersIns
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
+from flwr.server.criterion import Criterion
 
-from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_median, weighted_loss_avg
+# Import standard Flower aggregation functions
+from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
-from  flwr.server.criterion import Criterion
-
-from flwr.common.typing import GetParametersIns
-
+# Import custom aggregation functions from local modifications
+from flwr_lib_modifications.aggregate import aggregate_inplace, aggregate_score
+from model import LeNet
 
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
 Setting `min_available_clients` lower than `min_fit_clients` or
@@ -121,8 +120,8 @@ class GLow_strategy(Strategy):
         topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
-        min_fit_clients: int = 2, #Varible num subject to topology, (default value) not initialized here
-        min_evaluate_clients: int = 2, #Varible num subject to topology, (default value) not initialized here
+        min_fit_clients: int = 2,  # Varible num subject to topology, (default value) not initialized here
+        min_evaluate_clients: int = 2,  # Varible num subject to topology, (default value) not initialized here
         min_available_clients: int = 2,
         evaluate_fn: Optional[
             Callable[
@@ -140,25 +139,22 @@ class GLow_strategy(Strategy):
         early_local_train: Optional[bool] = False,
         run_id: str,
         num_classes: int,
-        #pool_total_rounds: int, 
+        # pool_total_rounds: int,
         pool_switch_down: List[List[int]],
         pool_switch_up: List[List[int]],
         pool_switch_malicious: List[List[int]],
         pool_status: List[str],
         pool_nature: List[str],
         seed: int,
-        save_path: str
+        save_path: str,
     ) -> None:
         super().__init__()
 
-        if (
-            min_fit_clients > min_available_clients
-            or min_evaluate_clients > min_available_clients
-        ):
+        if min_fit_clients > min_available_clients or min_evaluate_clients > min_available_clients:
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
         self.total_rounds = total_rounds
-        self.current_round = 0 #REPLACE BY server_round
+        self.current_round = 0  # REPLACE BY server_round
         self.topology = topology
         self.aggregation = aggregation
         self.fraction_fit = fraction_fit
@@ -183,7 +179,7 @@ class GLow_strategy(Strategy):
         self.seed = seed
         self.save_path = save_path
         self.early_local_train = early_local_train
-        
+
         # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE LOCAL ACCURACIES AND PARAMS
         self.neigh_metrics = []
         for i in range(min_available_clients):
@@ -191,7 +187,7 @@ class GLow_strategy(Strategy):
             for j in topology[i]:
                 self.neigh_metrics[i].append(None)
 
-        # CREATE STRUCTURE TO STORE RUNTIME INFO 
+        # CREATE STRUCTURE TO STORE RUNTIME INFO
         self.pool_switch_down = pool_switch_down
         self.pool_switch_up = pool_switch_up
         self.pool_switch_malicious = pool_switch_malicious
@@ -202,7 +198,7 @@ class GLow_strategy(Strategy):
         neighbors = self.topology[self.selected_pool]
         up_neighbors = []
         for neighbor in neighbors:
-            if self.pool_status[neighbor] == 'up':
+            if self.pool_status[neighbor] == "up":
                 up_neighbors.append(neighbor)
         return up_neighbors
 
@@ -210,29 +206,29 @@ class GLow_strategy(Strategy):
         for agent in self.client_list:
             if self.pool_switch_up[agent] is not None:
                 if self.current_round in self.pool_switch_up[agent]:
-                    self.pool_status[agent] = 'up'
+                    self.pool_status[agent] = "up"
             if self.pool_switch_down[agent] is not None:
                 if self.current_round in self.pool_switch_down[agent]:
-                    self.pool_status[agent] = 'down'
+                    self.pool_status[agent] = "down"
             if self.pool_switch_malicious[agent] is not None:
                 if self.current_round in self.pool_switch_malicious[agent]:
-                    self.pool_nature[agent] = 'malicious'
-                    self.topology[agent] = [agent] #STOP RECEIVING INFO FROM NETWORK
+                    self.pool_nature[agent] = "malicious"
+                    self.topology[agent] = [agent]  # STOP RECEIVING INFO FROM NETWORK
                     self.pool_metrics[agent] = None
                     self.pool_losses[agent] = None
                     self.neigh_metrics[agent] = [None]
                     self.pool_parameters[agent] = self.initial_parameters[agent]
-    
+
     def select_pool(self):
         search = True
-        while search: #POSSIBLE ISSUE IF ALL AGENTS DOWN, AT LEAST 1 UP
+        while search:  # POSSIBLE ISSUE IF ALL AGENTS DOWN, AT LEAST 1 UP
             self.selected_pool = self.client_list[0]
             self.pool_check()
-            if self.pool_status[self.selected_pool] == 'up':
+            if self.pool_status[self.selected_pool] == "up":
                 search = False
             else:
-                self.client_list = np.roll(self.client_list, -1).tolist() #pick first rotate list
-        self.client_list = np.roll(self.client_list, -1).tolist() #roll list for next rounds
+                self.client_list = np.roll(self.client_list, -1).tolist()  # pick first rotate list
+        self.client_list = np.roll(self.client_list, -1).tolist()  # roll list for next rounds
         self.current_round += 1
 
     def __repr__(self) -> str:
@@ -240,50 +236,60 @@ class GLow_strategy(Strategy):
         rep = f"FedAvg(accept_failures={self.accept_failures})"
         return rep
 
-      
     def num_fit_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Return the sample size and the required number of available clients."""
         num_clients = int(num_available_clients * self.fraction_fit)
-        '''Custom num clients depending on connection graph'''
+        """Custom num clients depending on connection graph"""
         self.min_fit_clients = len(self.topology[self.selected_pool])
         return max(num_clients, self.min_fit_clients), self.min_available_clients
 
     def num_evaluation_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
-        '''Custom num clients depending on connection graph'''
+        """Custom num clients depending on connection graph"""
         self.min_evaluate_clients = len(self.topology[self.selected_pool])
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
-    
 
-    def initialize_parameters(
-        self, client_manager: ClientManager
-    ) -> Optional[Parameters]:
+    def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
         """Initialize global model parameters."""
-        clients = client_manager.sample(self.min_available_clients) #Sample all clients
+        clients = client_manager.sample(self.min_available_clients)  # Sample all clients
         ins = GetParametersIns(config={})
-        
+
         if self.initial_parameters is None:
             self.initial_parameters = [None] * self.min_available_clients
             self.pool_parameters = [None] * self.min_available_clients
 
             for client in clients:
-                self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=None).parameters
-                self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
-        
+                # In Flower 1.25.0 simulation, use partition_id for list indexing
+                # For RayActorClientProxy, partition_id is the correct index
+                pid = getattr(client, "partition_id", int(client.cid))
+                self.initial_parameters[pid] = client.get_parameters(ins=ins, timeout=None, group_id=None).parameters
+                self.pool_parameters[pid] = self.initial_parameters[pid]
+
         self.select_pool()
         initial_parameters = self.initial_parameters[self.selected_pool]
         return initial_parameters
 
     def save_results(self):
-        out = ''
+        out = ""
         for cli_ID in range(self.min_available_clients):
-            out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
+            out = (
+                out
+                + "pool_ID: "
+                + str(cli_ID)
+                + " neighbours: "
+                + str(self.topology[cli_ID])
+                + " loss: "
+                + str(self.pool_losses[cli_ID])
+                + " acc: "
+                + str(self.pool_metrics[cli_ID])
+                + "\n"
+            )
         f = open(self.save_path + str(self.run_id) + "_pool.out", "w")
         f.write(out)
         f.close()
         # save parameters
-        param_path = self.save_path + 'parameters/'
+        param_path = self.save_path + "parameters/"
         os.makedirs(param_path)
         for cli_ID in range(self.min_available_clients):
             net = LeNet(self.num_classes)
@@ -293,71 +299,77 @@ class GLow_strategy(Strategy):
             state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
             net.load_state_dict(state_dict, strict=True)
             # Save the model
-            torch.save(net.state_dict(), param_path + str(cli_ID) + '.pth')
+            torch.save(net.state_dict(), param_path + str(cli_ID) + ".pth")
 
-    #EVALUATE PARAM PROPAGATION NEIGH (INDEPENDENT TESTSETS)
-    def evaluate(
-        self, server_round: int, parameters: Parameters
-    ) -> Optional[Tuple[float, Dict[str, Scalar]]]:
+    # EVALUATE PARAM PROPAGATION NEIGH (INDEPENDENT TESTSETS)
+    def evaluate(self, server_round: int, parameters: Parameters) -> Optional[Tuple[float, Dict[str, Scalar]]]:
         """Evaluate model parameters using an evaluation function."""
 
         if self.evaluate_fn is None:
             # No evaluation function provided
             return None
-        
+
+        # Initialize to avoid UnboundLocalError
+        head_loss = 0.0
+        head_metrics = {}
+
         for neighbour in self.get_up_neighbors():
-            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
-            config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
-            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
-            
+            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour])  # GET CUSTOM PARAMS
+            config = {"nature": self.pool_nature[self.selected_pool], "seed": self.seed}
+            eval_res = self.evaluate_fn(
+                self.selected_pool, server_round, parameters_ndarrays, config
+            )  # CALL CUSTOM FUNC
+
             if eval_res is None:
                 return None
-            
+
             loss, metrics = eval_res
-            self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
+            self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics["acc_cntrl"]
 
             # Track each pool metrics and results
             if neighbour == self.selected_pool:
                 self.pool_losses[self.selected_pool] = loss
-                self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+                self.pool_metrics[self.selected_pool] = metrics["acc_cntrl"]
                 head_loss = loss
                 head_metrics = metrics
-        
+
         # Save pool results and parameters in last rounds
         if server_round == self.total_rounds:
             self.save_results()
-        
+
         return head_loss, head_metrics
 
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, FitIns]]:
-        
-        #self.pool_check()
+
+        # self.pool_check()
         self.select_pool()
 
+        """Implementing abstract class"""
 
-        '''Implementing abstract class'''
         class select_criterion(Criterion):
             def __init__(self, cid_list):
                 self.cid_list = cid_list
+
             def select(self, client: ClientProxy) -> bool:
-                return client.cid in self.cid_list
+                # In Flower 1.25.0, use partition_id for comparison with connection list
+                pid = getattr(client, "partition_id", int(client.cid))
+                return pid in self.cid_list
 
         connections = self.get_up_neighbors()
 
-        clients = client_manager.sample(
-            num_clients=len(connections), criterion=select_criterion(connections)
-        )
+        clients = client_manager.sample(num_clients=len(connections), criterion=select_criterion(connections))
 
         # SORT CLIENTS FOR FUTURE AGGREGATIONS -- DEPRECATED??
         sorted_clients = []
         for neigh in connections:
             for client in clients:
-                if neigh == client.cid:
+                # In Flower 1.25.0, use partition_id for comparison
+                pid = getattr(client, "partition_id", int(client.cid))
+                if neigh == pid:
                     sorted_clients.append(client)
 
-        
         """Configure the next round of training."""
         pairs = []
         for client in sorted_clients:
@@ -365,13 +377,15 @@ class GLow_strategy(Strategy):
             if self.on_fit_config_fn is not None:
                 # Custom fit config function provided
                 config = self.on_fit_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
-            config['comm_round'] = server_round
-            config['num_agents'] = self.min_available_clients
-            config['nature'] = self.pool_nature[self.selected_pool]
-            config['seed'] = self.seed
+            config["local_train_cid"] = self.selected_pool
+            config["comm_round"] = server_round
+            config["num_agents"] = self.min_available_clients
+            config["nature"] = self.pool_nature[self.selected_pool]
+            config["seed"] = self.seed
 
-            fit_ins = FitIns(self.pool_parameters[client.cid], config)
+            # In Flower 1.25.0 simulation, use partition_id for list indexing
+            pid = getattr(client, "partition_id", int(client.cid))
+            fit_ins = FitIns(self.pool_parameters[pid], config)
             pairs.append((client, fit_ins))
         # Return client/config pairs
         return pairs
@@ -379,30 +393,33 @@ class GLow_strategy(Strategy):
     def configure_evaluate(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, EvaluateIns]]:
-        
-        '''Implementing abstract class'''
+        """Implementing abstract class"""
+
         class select_criterion(Criterion):
             def __init__(self, cid_list):
                 self.cid_list = cid_list
+
             def select(self, client: ClientProxy) -> bool:
-                return client.cid in self.cid_list     
+                # In Flower 1.25.0, use partition_id for comparison with connection list
+                pid = getattr(client, "partition_id", int(client.cid))
+                return pid in self.cid_list
 
         """Configure the next round of evaluation."""
         # Do not configure federated evaluation if fraction eval is 0.
         if self.fraction_evaluate == 0.0:
             return []
-        
+
         connections = self.get_up_neighbors()
 
-        clients = client_manager.sample(
-            num_clients=len(connections), criterion=select_criterion(connections)
-        )
+        clients = client_manager.sample(num_clients=len(connections), criterion=select_criterion(connections))
 
         # SORT CLIENTS FOR FUTURE AGGREGATIONS
         sorted_clients = []
         for neigh in connections:
             for client in clients:
-                if neigh == client.cid:
+                # In Flower 1.25.0, use partition_id for comparison
+                pid = getattr(client, "partition_id", int(client.cid))
+                if neigh == pid:
                     sorted_clients.append(client)
 
         # Parameters and config
@@ -412,14 +429,16 @@ class GLow_strategy(Strategy):
             if self.on_evaluate_config_fn is not None:
                 # Custom fit config function provided
                 config = self.on_evaluate_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
-            config['nature'] = self.pool_nature[self.selected_pool]
-            config['seed'] = self.seed
+            config["local_train_cid"] = self.selected_pool
+            config["nature"] = self.pool_nature[self.selected_pool]
+            config["seed"] = self.seed
 
-            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config) #POSIBLEMENTE FALLO ESTE AQUI
+            # In Flower 1.25.0 simulation, use partition_id for list indexing
+            pid = getattr(client, "partition_id", int(client.cid))
+            evaluate_ins = EvaluateIns(self.pool_parameters[pid], config)  # POSIBLEMENTE FALLO ESTE AQUI
             pairs.append((client, evaluate_ins))
         # Return client/config pairs
-        return pairs 
+        return pairs
 
     def aggregate_fit(
         self,
@@ -430,45 +449,49 @@ class GLow_strategy(Strategy):
         """Aggregate fit results using weighted average."""
         if not results:
             return None, {}
-        
+
         # Do not aggregate if there are failures and failures are not accepted
         if not self.accept_failures and failures:
             return None, {}
 
-
         ######CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME######
         for neighbour in self.get_up_neighbors():
-            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
-            config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
-            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
-        
+            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour])  # GET CUSTOM PARAMS
+            config = {"nature": self.pool_nature[self.selected_pool], "seed": self.seed}
+            eval_res = self.evaluate_fn(
+                self.selected_pool, server_round, parameters_ndarrays, config
+            )  # CALL CUSTOM FUNC
+
         if eval_res is None:
             return None
-        
+
         loss, metrics = eval_res
-        self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
+        self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics["acc_cntrl"]
         # Track each pool metrics and results
         if neighbour == self.selected_pool:
             self.pool_losses[self.selected_pool] = loss
-            self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+            self.pool_metrics[self.selected_pool] = metrics["acc_cntrl"]
         #############################################################
 
-
-        if self.aggregation == 'inplace':
+        if self.aggregation == "inplace":
             aggregated_ndarrays = aggregate_inplace(results)
-        elif self.aggregation == 'score':
-            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool) #Trust pairs
-        elif self.aggregation == 'score_neigh_params':
-            aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
+        elif self.aggregation == "score":
+            aggregated_ndarrays = aggregate_score(
+                results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool
+            )  # Trust pairs
+        elif self.aggregation == "score_neigh_params":
+            aggregated_ndarrays = aggregate_score(
+                results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool
+            )  # Don't trust pairs and params are locally evaluated
         else:
             # Does weighted average of results
             weights_results = [
-                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples) #fit_res.metrics
+                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)  # fit_res.metrics
                 for _, fit_res in results
             ]
             aggregated_ndarrays = aggregate(weights_results)
-            #aggregated_ndarrays = aggregate_median(weights_results)
-        
+            # aggregated_ndarrays = aggregate_median(weights_results)
+
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
 
         # Aggregate custom metrics if aggregation fn was provided
@@ -481,8 +504,8 @@ class GLow_strategy(Strategy):
 
         self.pool_parameters[self.selected_pool] = parameters_aggregated
 
-        '''Spread knowledge to other clients'''
-        #No point updating local network parameter of the neighbors with the local average and model
+        """Spread knowledge to other clients"""
+        # No point updating local network parameter of the neighbors with the local average and model
 
         return parameters_aggregated, metrics_aggregated
 
@@ -501,10 +524,7 @@ class GLow_strategy(Strategy):
 
         # Aggregate loss
         loss_aggregated = weighted_loss_avg(
-            [
-                (evaluate_res.num_examples, evaluate_res.loss)
-                for _, evaluate_res in results
-            ]
+            [(evaluate_res.num_examples, evaluate_res.loss) for _, evaluate_res in results]
         )
         # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}

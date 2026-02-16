@@ -1,11 +1,11 @@
 run_name: '0'
-aggregation: 'score_neigh_params' #'inplace', 'score', 'score_neigh_params'
-topology: './conf/topologies/poison_example/custom_8_2.yaml'
-runtime: './conf/topologies/poison_example/custom_8_2_runtime.yaml'
+aggregation: 'inplace' #'inplace', 'score', 'score_neigh_params'
+topology: './conf/topologies/graph_8_2/graph_1.yaml'
+runtime: './conf/topologies/graph_8_2/runtime.yaml'
 split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: CPU
 early_local_train: False
-num_rounds: 1024 #240 #512 #800 #1024
+num_rounds: 3 #Reduced for testing
 # num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 # num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
@@ -15,4 +15,4 @@ seed: 1999
 config_fit:
   lr: 0.0001
   momentum: 0.9
-  local_epochs: 32
+  local_epochs: 1 #Reduced for testing

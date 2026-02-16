@@ -14,7 +14,7 @@
 # ==============================================================================
 """Flower simulation app."""
 
-#.venv/lib/python3.9/site-packages/flwr/simulation/app.py -------------------- LINE 215
+# .venv/lib/python3.9/site-packages/flwr/simulation/app.py -------------------- LINE 215
 
 import sys
 import threading
@@ -24,8 +24,6 @@ from logging import ERROR, INFO
 from typing import Any, Dict, List, Optional, Type, Union
 
 import ray
-from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
-
 from flwr.client import ClientFn
 from flwr.common import EventType, event
 from flwr.common.logger import log
@@ -41,6 +39,7 @@ from flwr.simulation.ray_transport.ray_actor import (
     pool_size_from_resources,
 )
 from flwr.simulation.ray_transport.ray_client_proxy import RayActorClientProxy
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 INVALID_ARGUMENTS_START_SIMULATION = """
 INVALID ARGUMENTS ERROR
@@ -198,7 +197,7 @@ def start_simulation(
             cids = [str(x) for x in range(num_clients)]
 
     # Default arguments for Ray initialization
-    #if not ray_init_args:
+    # if not ray_init_args:
     #    log('RAY')
     #    ray_init_args = {
     #        "num_cpus": 1,
@@ -211,8 +210,8 @@ def start_simulation(
         ray.shutdown()
 
     # Initialize Ray
-    #ray.init(**ray_init_args)
-    ray.init(num_cpus=4, num_gpus=0, ignore_reinit_error = True)
+    # ray.init(**ray_init_args)
+    ray.init(num_cpus=4, num_gpus=0, ignore_reinit_error=True)
     cluster_resources = ray.cluster_resources()
     log(
         INFO,
@@ -222,8 +221,7 @@ def start_simulation(
 
     log(
         INFO,
-        "Optimize your simulation with Flower VCE: "
-        "https://flower.dev/docs/framework/how-to-run-simulations.html",
+        "Optimize your simulation with Flower VCE: https://flower.dev/docs/framework/how-to-run-simulations.html",
     )
 
     # Log the resources that a single client will be able to use
@@ -237,8 +235,7 @@ def start_simulation(
     # Each client needs at the very least one CPU
     if "num_cpus" not in client_resources:
         warnings.warn(
-            "No `num_cpus` specified in `client_resources`. "
-            "Using `num_cpus=1` for each client.",
+            "No `num_cpus` specified in `client_resources`. Using `num_cpus=1` for each client.",
             stacklevel=2,
         )
         client_resources["num_cpus"] = 1
@@ -280,9 +277,7 @@ def start_simulation(
             num_max_actors = pool_size_from_resources(client_resources)
             if num_max_actors > pool.num_actors:
                 num_new = num_max_actors - pool.num_actors
-                log(
-                    INFO, "The cluster expanded. Adding %s actors to the pool.", num_new
-                )
+                log(INFO, "The cluster expanded. Adding %s actors to the pool.", num_new)
                 pool.add_actors_to_pool(num_actors=num_new)
 
             threading.Timer(10, update_resources, [f_stop]).start()

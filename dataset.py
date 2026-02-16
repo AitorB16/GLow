@@ -11,7 +11,7 @@ import torchvision.datasets as torch_datasets
 #import ssl
 
 
-def get_cifar10(data_path: str = "..datasets"):
+def get_cifar10(data_path: str = "datasets"):
     """Downlaod CIFAR and apply a simple transform."""
     #ssl._create_default_https_context = ssl._create_unverified_context
     torch_datasets.CIFAR10.url="http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"

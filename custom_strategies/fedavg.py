@@ -17,7 +17,6 @@
 Paper: arxiv.org/abs/1602.05629
 """
 
-
 from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -37,8 +36,12 @@ from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
-from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
+# Import standard Flower aggregation functions
+from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
+
+# Import custom aggregation function from local modifications
+from flwr_lib_modifications.aggregate import aggregate_inplace
 
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
 Setting `min_available_clients` lower than `min_fit_clients` or
@@ -111,10 +114,7 @@ class FedAvg(Strategy):
     ) -> None:
         super().__init__()
 
-        if (
-            min_fit_clients > min_available_clients
-            or min_evaluate_clients > min_available_clients
-        ):
+        if min_fit_clients > min_available_clients or min_evaluate_clients > min_available_clients:
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
         self.fraction_fit = fraction_fit
@@ -146,17 +146,13 @@ class FedAvg(Strategy):
         num_clients = int(num_available_clients * self.fraction_evaluate)
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
 
-    def initialize_parameters(
-        self, client_manager: ClientManager
-    ) -> Optional[Parameters]:
+    def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
         """Initialize global model parameters."""
         initial_parameters = self.initial_parameters
         self.initial_parameters = None  # Don't keep initial parameters in memory
         return initial_parameters
 
-    def evaluate(
-        self, server_round: int, parameters: Parameters
-    ) -> Optional[Tuple[float, Dict[str, Scalar]]]:
+    def evaluate(self, server_round: int, parameters: Parameters) -> Optional[Tuple[float, Dict[str, Scalar]]]:
         """Evaluate model parameters using an evaluation function."""
         if self.evaluate_fn is None:
             # No evaluation function provided
@@ -176,18 +172,14 @@ class FedAvg(Strategy):
         if self.on_fit_config_fn is not None:
             # Custom fit config function provided
             config = self.on_fit_config_fn(server_round)
-            config['local_train_cid'] = -1
-            config['comm_round'] = server_round
-            config['num_nodes'] = self.min_available_clients
+            config["local_train_cid"] = -1
+            config["comm_round"] = server_round
+            config["num_nodes"] = self.min_available_clients
         fit_ins = FitIns(parameters, config)
 
         # Sample clients
-        sample_size, min_num_clients = self.num_fit_clients(
-            client_manager.num_available()
-        )
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
-        )
+        sample_size, min_num_clients = self.num_fit_clients(client_manager.num_available())
+        clients = client_manager.sample(num_clients=sample_size, min_num_clients=min_num_clients)
 
         # Return client/config pairs
         return [(client, fit_ins) for client in clients]
@@ -205,16 +197,12 @@ class FedAvg(Strategy):
         if self.on_evaluate_config_fn is not None:
             # Custom evaluation config function provided
             config = self.on_evaluate_config_fn(server_round)
-            config['local_train_cid'] = -1
+            config["local_train_cid"] = -1
         evaluate_ins = EvaluateIns(parameters, config)
 
         # Sample clients
-        sample_size, min_num_clients = self.num_evaluation_clients(
-            client_manager.num_available()
-        )
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
-        )
+        sample_size, min_num_clients = self.num_evaluation_clients(client_manager.num_available())
+        clients = client_manager.sample(num_clients=sample_size, min_num_clients=min_num_clients)
 
         # Return client/config pairs
         return [(client, evaluate_ins) for client in clients]
@@ -238,8 +226,7 @@ class FedAvg(Strategy):
         else:
             # Convert results
             weights_results = [
-                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
-                for _, fit_res in results
+                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples) for _, fit_res in results
             ]
             aggregated_ndarrays = aggregate(weights_results)
 
@@ -270,10 +257,7 @@ class FedAvg(Strategy):
 
         # Aggregate loss
         loss_aggregated = weighted_loss_avg(
-            [
-                (evaluate_res.num_examples, evaluate_res.loss)
-                for _, evaluate_res in results
-            ]
+            [(evaluate_res.num_examples, evaluate_res.loss) for _, evaluate_res in results]
         )
 
         # Aggregate custom metrics if aggregation fn was provided

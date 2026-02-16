@@ -1,0 +1,25 @@
+# GLow - Flower-based Gossip Learning Strategy
+# Python Version: 3.12 (tested with Python 3.12.3)
+# Minimum Python Version: 3.10
+
+# Core ML libraries
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Data processing
+pandas>=1.5.0
+scikit-learn>=1.2.0
+
+# Configuration management
+pyyaml>=6.0
+hydra-core>=1.3.0
+omegaconf>=2.3.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# Federated Learning - Updated to Flower 1.25.0
+flwr[simulation]==1.25.0
+
+# Build tools - Updated to address security vulnerabilities
+setuptools>=78.1.1

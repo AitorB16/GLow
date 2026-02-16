@@ -7,5 +7,5 @@ hydra-core
 omegaconf
 matplotlib
 scikit-learn
-flwr[simulation]==1.7.0
-setuptools==65.0.0
+flwr[simulation]==1.25.0
+setuptools>=78.1.1
