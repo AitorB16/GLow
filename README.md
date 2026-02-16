@@ -14,7 +14,7 @@ Moreover, a Centralized (CNL) and a Centralized Federated Learning (CFL) version
 ## Dependencies
 Install the required libraries present on [deps.req](deps.req).
 
-Built upon Flower v1.7.0.
+Built upon Flower v1.26.1.
 > Note: Python3.10 and pip3 package installer are recommended.
 
 ## Dataset
@@ -147,3 +147,4 @@ If having problems with Ray Scalability (regarding dataset, python and ray versi
 ## License
 
 MIT
+
