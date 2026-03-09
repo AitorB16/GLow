@@ -11,11 +11,13 @@ Moreover, a Centralized (CNL) and a Centralized Federated Learning (CFL) version
 - **visualization**: Notebooks to visualize GLow and centralized FL outputs as well as topology architecture (graphs)
 
 
-## Dependencies
-Install the required libraries present on [deps.req](deps.req).
-
-Built upon Flower v1.7.0.
-> Note: Python3.10 and pip3 package installer are recommended.
+## Installation and Dependencies
+Built upon Flower v1.7.0 and setuptools v65.0.0 -- using Python 3.10.
+As the [uv.lock](uv.lock) file is present, just run:
+```sh 
+uv sync
+```
+> Note: Using [uv](https://docs.astral.sh/uv/guides/install-python/) will setup the whole project and dependencies automatically.
 
 ## Dataset
 Download or create a custom dataset, the implementation is currently designed to work with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) which should be downloaded, extracted and placed into the [dataset](../dataset) directory.
@@ -139,6 +141,8 @@ Dealing with control nodes with no local data is not a Flower feature. Performin
 Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *aggregate_score()*, *aggregate_score_neigh_params()*.
 
 If having problems with Ray Scalability (regarding dataset, python and ray versions), check [flwr/simulation/app.py](/flwr_lib_modifications/app.py).
+
+> Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py). 
 
 ## Author
 
