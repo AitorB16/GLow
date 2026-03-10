@@ -42,6 +42,7 @@ class FlowerClient(fl.client.NumPyClient):
         #copy params from server in local models
         self.set_parameters(parameters)
         metrics_val_distr = None
+        centroid = None
         
         #Perform local training just in the selected node head
         if config['local_train_cid'] == self.cid or config['local_train_cid'] == -1: # Case for GL or Case for FL
@@ -49,18 +50,18 @@ class FlowerClient(fl.client.NumPyClient):
             if config['comm_round'] <= config['num_agents']: # In first n initial rounds
                 epochs = config['local_epochs'] # Option to achieve a faster converge in the first * 3 epochs
             elif config['nature'] == 'malicious':
-                epochs = config['local_epochs']*5
+                epochs = config['local_epochs']#*5
             else:
                 epochs = config['local_epochs']
 
             optim = torch.optim.Adam(self.model.parameters(), lr=lr)
             #local training
-            distr_loss_train, metrics_val_distr = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, config['nature'], self.device)
+            distr_loss_train, metrics_val_distr, centroid = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, config['nature'], self.device)
         
-            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
+            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'centroid': centroid, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
         
         #Return current acc and params from neighbours
-        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'HEAD': 'NO', 'distr_val_loss': '##', 'energy used': '10W'}
+        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'centroid': centroid,'HEAD': 'NO', 'distr_val_loss': '##', 'energy used': '10W'}
 
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):

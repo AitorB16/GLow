@@ -123,6 +123,54 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
     
     return params
 
+def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[int], neighbours: List[int], head_id: int, alpha: int = 0.5) -> NDArrays:
+    """Compute score weighted average."""
+
+    ordered_results = []
+    for n in neighbours:
+        for i, (cli, fit_res) in enumerate(results):
+            if n == cli.cid:
+                #print(neighbours)
+                #print(cli.cid)
+                ordered_results.append(results[i])
+        
+    scaling_norm = 0.
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
+            scaling_norm += fit_res.metrics['acc_val_distr']
+        else:
+            if neighbour_metrics[i] is not None:
+                scaling_norm += neighbour_metrics[i]
+
+    # AVOID DIVISION BY 0
+    if scaling_norm == 0:
+        scaling_norm = 1.0
+
+    scaling_factors = []
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
+            scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
+        else:
+            if neighbour_metrics[i] is not None:
+                scaling_factors.append(neighbour_metrics[i] / scaling_norm)
+            else:
+                scaling_factors.append(0.)
+
+    # Let's do in-place aggregation
+    # Get first result, then add up each other
+
+    params = [
+        scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
+    ]
+    
+    for i, (_, fit_res) in enumerate(ordered_results[1:]):
+        res = (
+            scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters)
+        )
+        params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
+    
+    return params
+
 
 def aggregate_median(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     """Compute median."""

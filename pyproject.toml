@@ -3,7 +3,7 @@ name = "glow"
 version = "0.1.0"
 description = "GLow - A Flower Based Gossip Learning Strategy"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "==3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Aitor Belenguer"}

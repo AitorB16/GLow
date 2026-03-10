@@ -77,12 +77,19 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
 
     # VALIDATION
     correct, total_size, valid_loss = 0, 0, 0.0
+    centroids = torch.tensor([0] * num_classes) #COMPUTE CENTROIDS USING VAL-SET
+    instances_per_class = torch.tensor([0] * num_classes)
+
     net.eval()     # Optional when not using Model Specific layer
     for inputs, labels in validationloader:
         if nature == 'malicious': #FLIP LABEL
                 mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
                 #mapping = torch.tensor(np.random.randint(10, size=10))
                 labels = mapping[labels]
+        
+        for c in range(num_classes):
+            instances_per_class[c]+= (labels == c).sum()
+
         # Transfer Data to GPU if available
         inputs, labels = inputs.to(device), labels.to(device)
         # Forward Pass
@@ -91,13 +98,20 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
         valid_loss += criterion(outputs, labels).item()
         correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
         total_size += labels.size(0)
+
+        for c in range(num_classes):
+            centroids[c] += ((labels == c) & (torch.max(outputs.data, 1)[1] == labels).sum().item()).sum()
+
     if total_size > 0:
         val_accuracy = correct / total_size
-    else:
+        centroids = centroids/instances_per_class
+    else: #Just in case no local data
         val_accuracy = 1./num_classes
+        centroids = torch.tensor([1./num_classes] * num_classes)
+    
     metrics_val_distributed_fit = val_accuracy
 
-    return train_loss, metrics_val_distributed_fit
+    return train_loss, metrics_val_distributed_fit, centroids
 
 def test(net, testloader, num_classes, nature, device):
     """Validate the network on the entire test set.
