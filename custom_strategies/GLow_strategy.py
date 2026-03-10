@@ -179,7 +179,7 @@ class GLow_strategy(Strategy):
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
-        self.centroids = [0] * num_classes
+        self.centroid = [0] * num_classes
         self.run_id = run_id
         self.num_classes = num_classes
         self.seed = seed
@@ -192,6 +192,13 @@ class GLow_strategy(Strategy):
             self.neigh_metrics.append([])
             for j in topology[i]:
                 self.neigh_metrics[i].append(None)
+
+        # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE NEIGH CENTROIDS
+        self.neigh_centroids = []
+        for i in range(min_available_clients):
+            self.neigh_centroids.append([])
+            for j in topology[i]:
+                self.neigh_centroids[i].append(self.centroid)
 
         # CREATE STRUCTURE TO STORE RUNTIME INFO 
         self.pool_switch_down = pool_switch_down
@@ -224,6 +231,7 @@ class GLow_strategy(Strategy):
                     self.pool_losses[agent] = None
                     self.neigh_metrics[agent] = [None]
                     self.pool_parameters[agent] = self.initial_parameters[agent]
+                    #self.neigh_centroids[agent] - RESET TOO
     
     def select_pool(self):
         search = True
@@ -438,21 +446,27 @@ class GLow_strategy(Strategy):
             return None, {}
 
 
-        ######CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME######
+        #############################################################
+        #CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME
         for neighbour in self.get_up_neighbors():
             parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
             config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
             eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
+            
+            #THIS MUST BE INSIDE LOOP!!!
+            if eval_res is None:
+                return None
+            loss, metrics = eval_res
+            self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
+
+            # Track each pool metrics and results
+            if neighbour == self.selected_pool:
+                self.pool_losses[self.selected_pool] = loss
+                self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+        #############################################################
         
-        if eval_res is None:
-            return None
-        
-        loss, metrics = eval_res
-        self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
-        # Track each pool metrics and results
-        if neighbour == self.selected_pool:
-            self.pool_losses[self.selected_pool] = loss
-            self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+        #############################################################
+        #SAVE CENTROIDS DATA STRUCTURE - cosine distance --  HERE?
         #############################################################
 
 
@@ -463,7 +477,7 @@ class GLow_strategy(Strategy):
         elif self.aggregation == 'score_neigh_params':
             aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'score_neigh_params_centroids':
-            aggregated_ndarrays = aggregate_score_centroids(results, self.neigh_metrics[self.selected_pool], self.centroids[self.selected_pool] ,self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score_centroids(results, self.neigh_metrics[self.selected_pool], self.neigh_centroids[self.selected_pool],self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
         else:
             # Does weighted average of results
             weights_results = [
@@ -482,6 +496,15 @@ class GLow_strategy(Strategy):
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No fit_metrics_aggregation_fn provided")
+
+        #SAVE CENTROIDS DATA STRUCTURE - cosine distance --  HERE? -- CHECK AND POSSIBLY UPDATE
+        self.centroid = metrics_aggregated['centroid'][metrics_aggregated['cid'].index(self.selected_pool)]
+        #print(self.centroid)
+        
+        for neighbour in self.get_up_neighbors():
+            self.neigh_centroids[neighbour][self.topology[neighbour].index(self.selected_pool)] = self.centroid
+
+        ######CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME######???
 
         self.pool_parameters[self.selected_pool] = parameters_aggregated
 
