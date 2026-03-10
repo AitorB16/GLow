@@ -71,28 +71,28 @@ class FlowerClient(fl.client.NumPyClient):
         loss, accuracy = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
         return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
 
-def generate_client_fn(vcid, trainloaders, validationloaders, num_classes, seed, device):
+def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed, device):
     def client_fn(cid: str):
-        return FlowerClient(vcid[int(cid)], trainloader=trainloaders[int(cid)], validationloader=validationloaders[int(cid)], num_classes=num_classes, seed=seed, device=device).to_client()
+        return FlowerClient(cids[int(cid)], trainloader=trainloaders[int(cid)], validationloader=validationloaders[int(cid)], num_classes=num_classes, seed=seed, device=device).to_client()
     return client_fn
 
 def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
     acc = []
-    vcid = []
+    cids = []
     for num_examples, m in metrics:
         acc.append(m['acc_distr'])
-        vcid.append(m['cid'])
+        cids.append(m['cid'])
     # Aggregate and return custom metric (weighted average)
-    return {"acc_distr": acc, "cid": vcid}
+    return {"acc_distr": acc, "cid": cids}
 
 def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
     acc = []
-    vcid = []
+    cids = []
     centroid = []
     for num_examples, m in metrics:
         acc.append(m['acc_val_distr'])
-        vcid.append(m['cid'])
+        cids.append(m['cid'])
         centroid.append(m['centroid'])
     
     # Aggregate and return custom metric (weighted average)
-    return {"acc_val_distr": acc, "cid": vcid, "centroid": centroid}
+    return {"acc_val_distr": acc, "cid": cids, "centroid": centroid}

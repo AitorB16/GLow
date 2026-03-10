@@ -38,10 +38,10 @@ def main(cfg: DictConfig):
         tplgy = yaml.safe_load(file)
 
     num_clients = tplgy['num_clients']
-    vcid = np.arange(num_clients) #Client IDs
+    cids = np.arange(num_clients) #Client IDs
 
     topology = []
-    for cli_ID in vcid:
+    for cli_ID in cids:
         topology.append(tplgy['pools']['p'+str(cli_ID)])
 
     with open(cfg.runtime, 'r') as file:
@@ -79,7 +79,7 @@ def main(cfg: DictConfig):
     device = cfg.device
     
     # 3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(vcid, trainloaders, validationloaders, cfg.num_classes, cfg.seed, device)
+    client_fn = generate_client_fn(cids, trainloaders, validationloaders, cfg.num_classes, cfg.seed, device)
 
     # 4. DEFINE A STRATEGY
     strategy = GLow_strategy(
@@ -107,15 +107,15 @@ def main(cfg: DictConfig):
 
     ''' In case new strategies and configurations are deployed on run (NOT IN USE CURRENTLY)'''
     '''strategy_pool = []
-    for cli_ID in vcid:
+    for cli_ID in cids:
         strategy_pool.append(strategy)
     
     server_config_pool = []
-    for cli_ID in vcid:
+    for cli_ID in cids:
         server_config_pool.append(fl.server.ServerConfig(num_rounds=cfg.num_rounds))
     
     server_pool = []
-    for cli_ID in vcid:
+    for cli_ID in cids:
         server_pool.append(fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy))'''
 
     server_config = fl.server.ServerConfig(num_rounds=cfg.num_rounds)
@@ -131,7 +131,7 @@ def main(cfg: DictConfig):
     history = fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=num_clients,
-        clients_ids = vcid,
+        clients_ids = cids,
         server = server,
         config=server_config,
         strategy=strategy,
