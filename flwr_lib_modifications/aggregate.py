@@ -25,6 +25,8 @@ import numpy as np
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from flwr.server.client_proxy import ClientProxy
 
+from scipy.spatial.distance import pdist, squareform
+
 
 def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     """Compute weighted average."""
@@ -123,7 +125,7 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
     
     return params
 
-def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[int], neighbours: List[int], head_id: int, alpha: int = 0.5) -> NDArrays:
+def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[List[float]], neighbours: List[int], head_id: int, alpha: int = 0.5) -> NDArrays:
     """Compute score weighted average."""
 
     ordered_results = []
@@ -142,6 +144,15 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
             if neighbour_metrics[i] is not None:
                 scaling_norm += neighbour_metrics[i]
 
+    dissimilarity_matrix = squareform(pdist(centroids, metric='cosine'))
+    dissimilarity_vector = dissimilarity_matrix[neighbours.index(head_id)]
+    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id))
+    dissimilarity_vector_sum = sum(dissimilarity_vector)
+
+    if dissimilarity_vector_sum == 0:
+        dissimilarity_vector_sum = 1.
+        alpha = 1.
+
     # AVOID DIVISION BY 0
     if scaling_norm == 0:
         scaling_norm = 1.0
@@ -159,13 +170,15 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
     # Let's do in-place aggregation
     # Get first result, then add up each other
 
+    #SELF PARAMS GO PLAIN
     params = [
         scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
     
+    
     for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
-            scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters)
+            ((1-alpha) * dissimilarity_vector[i]/dissimilarity_vector_sum + alpha * scaling_factors[i + 1]) * x for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
     

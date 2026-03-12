@@ -77,8 +77,8 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
 
     # VALIDATION
     correct, total_size, valid_loss = 0, 0, 0.0
-    centroid = torch.tensor([0] * num_classes) #COMPUTE CENTROID USING VAL-SET
-    instances_per_class = torch.tensor([0] * num_classes)
+    centroid = torch.tensor([0.] * num_classes) #COMPUTE CENTROID USING VAL-SET
+    instances_per_class = torch.tensor([0.] * num_classes)
 
     net.eval()     # Optional when not using Model Specific layer
     for inputs, labels in validationloader:
@@ -104,10 +104,11 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
 
     if total_size > 0:
         val_accuracy = correct / total_size
-        centroid = centroid/instances_per_class
-    else: #Just in case no local data
-        val_accuracy = 1./num_classes
-        centroid = torch.tensor([1./num_classes] * num_classes)
+        mask = instances_per_class > 0
+        centroid[mask] /= instances_per_class[mask]
+    else: #Just in case no local data -- THIS CASE NEEDS FURTHER ADDRESSING
+        val_accuracy = 1. / num_classes
+        #centroid = torch.tensor([1./num_classes] * num_classes)
     
     metrics_val_distributed_fit = val_accuracy
 

@@ -205,6 +205,85 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
 
     return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
+def skew_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+    
+    alpha = 0.1
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+    
+    # SEVERAL TRAIN SETS / COMMON TEST SET
+    """Load CIFAR-10 (training and test-set). DIRICHLET"""
+    trainset, testset = get_cifar10()
+
+    labels = np.array(trainset.targets)
+    client_indices = [[] for _ in range(num_clients)]
+
+    clients_with_data = []
+    for i in range(num_clients):
+        if not clients_with_no_data:
+            clients_with_data.append(i)
+        elif i not in clients_with_no_data:
+            clients_with_data.append(i)
+
+    for c in range(num_classes):
+
+        idx = np.where(labels == c)[0]
+        np.random.shuffle(idx)
+
+        proportions = np.random.dirichlet(alpha * np.ones(len(clients_with_data)))
+
+        split_points = (np.cumsum(proportions) * len(idx)).astype(int)[:-1]
+        class_split = np.split(idx, split_points)
+
+        for i, client_id in enumerate(clients_with_data):
+            client_indices[client_id].extend(class_split[i])
+
+    partition_len_train = [len(idxs) for idxs in client_indices]
+
+    trainsets = [
+        torch.utils.data.Subset(trainset, client_indices[i])
+        for i in range(num_clients)
+    ]
+
+    trainloaders = []
+    validationloaders = []
+
+    for trainset_ in trainsets:
+        num_total = len(trainset_)
+        num_val = int(val_ratio * num_total)
+        num_train = num_total - num_val
+        for_train, for_val = random_split(
+            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
+        )
+        if num_total > 0:
+            trainloaders.append(
+                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
+            )
+            validationloaders.append(
+                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
+            )
+        else:
+            trainloaders.append('')
+            validationloaders.append('')
+
+    #TEST SET
+    ordered_testset = []
+
+    for i in range(num_classes):
+        tmp_part = []
+        for j, data in enumerate(testset):
+            img, label = data
+            if label == i:
+                tmp_part.append(data)
+        ordered_testset.extend(tmp_part)
+
+    testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
+    testloaders = [testloader] * num_clients
+    ordered_testset = [len(ordered_testset)] * num_clients
+
+    return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
+
+
 def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
     np.random.seed(seed=seed)
     torch.manual_seed(seed)

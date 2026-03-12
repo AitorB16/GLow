@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib>=3.7.0",
     "setuptools==65.0.0",
     "flwr[simulation]==1.7.0",
+    "scipy>=1.13.1"
 ]
 
 [project.optional-dependencies]

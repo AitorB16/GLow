@@ -2,10 +2,10 @@ run_name: '0'
 aggregation: 'score_neigh_params_centroids' #'inplace', 'score', 'score_neigh_params', 'score_neigh_params_centroids'
 topology: './conf/topologies/graph_8_2/graph_1.yaml'
 runtime: './conf/topologies/graph_8_2/runtime.yaml'
-split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
+split_dataset: 'skew_class_niid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'skew_class_niid_train_common_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: CPU
 early_local_train: False
-num_rounds: 3 #240 #512 #800 #1024
+num_rounds: 512 #240 #512 #800 #1024
 # num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 # num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 128
