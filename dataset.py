@@ -11,7 +11,7 @@ import torchvision.datasets as torch_datasets
 #import ssl
 
 
-def get_cifar10(data_path: str = "..datasets"):
+def get_cifar10(data_path: str = ".datasets"):
     """Downlaod CIFAR and apply a simple transform."""
     #ssl._create_default_https_context = ssl._create_unverified_context
     torch_datasets.CIFAR10.url="http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
@@ -206,7 +206,8 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
     return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
 def skew_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
-    
+    #It will need refinement to work with clients with NO data - 0 instances...
+
     alpha = 0.1
     np.random.seed(seed=seed)
     torch.manual_seed(seed)

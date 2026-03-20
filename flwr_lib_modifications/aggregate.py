@@ -125,17 +125,29 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
     
     return params
 
-def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[List[float]], neighbours: List[int], head_id: int, alpha: int = 0.5) -> NDArrays:
+def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[List[float]], neighbours: List[int], head_id: int, current_round: int, alpha: int = 0.5) -> NDArrays:
     """Compute score weighted average."""
+
+    alpha_prima = 1.
+    #alpha = 0.5
 
     ordered_results = []
     for n in neighbours:
         for i, (cli, fit_res) in enumerate(results):
             if n == cli.cid:
-                #print(neighbours)
-                #print(cli.cid)
                 ordered_results.append(results[i])
-        
+
+
+    dissimilarity_matrix = squareform(pdist(centroids, metric='cosine'))
+    dissimilarity_vector = dissimilarity_matrix[neighbours.index(head_id)]
+    dissimilarity_vector = np.clip(dissimilarity_vector, 1e-6, None)
+    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id))
+    dissimilarity_vector_sum = sum(dissimilarity_vector)
+
+    if dissimilarity_vector_sum > 0.:
+        dissimilarity_vector = dissimilarity_vector/dissimilarity_vector_sum
+    
+
     scaling_norm = 0.
     for i, (cli, fit_res) in enumerate(ordered_results):
         if cli.cid == head_id:
@@ -144,25 +156,16 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
             if neighbour_metrics[i] is not None:
                 scaling_norm += neighbour_metrics[i]
 
-    dissimilarity_matrix = squareform(pdist(centroids, metric='cosine'))
-    dissimilarity_vector = dissimilarity_matrix[neighbours.index(head_id)]
-    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id))
-    dissimilarity_vector_sum = sum(dissimilarity_vector)
-
-    if dissimilarity_vector_sum == 0:
-        dissimilarity_vector_sum = 1.
-        alpha = 1.
-
-    # AVOID DIVISION BY 0
-    if scaling_norm == 0:
-        scaling_norm = 1.0
 
     scaling_factors = []
     for i, (cli, fit_res) in enumerate(ordered_results):
         if cli.cid == head_id:
-            scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
+            if scaling_norm > 0.:
+                scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
+            else:
+                scaling_factors.append(0.)
         else:
-            if neighbour_metrics[i] is not None:
+            if neighbour_metrics[i] is not None and scaling_norm > 0.:
                 scaling_factors.append(neighbour_metrics[i] / scaling_norm)
             else:
                 scaling_factors.append(0.)
@@ -170,20 +173,32 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
     # Let's do in-place aggregation
     # Get first result, then add up each other
 
+
+    weights = []
+    for i in range(len(ordered_results) - 1):
+        w = (1 - alpha) * dissimilarity_vector[i] + alpha * scaling_factors[i + 1]
+        weights.append(w)
+
+    if dissimilarity_vector_sum > 0.:
+        print(dissimilarity_vector)
+        all_weights = [alpha_prima * scaling_factors[0]] + list(weights)
+        all_weights = np.array(all_weights)
+        all_weights = all_weights / all_weights.sum()
+    else:
+        all_weights = scaling_factors
+
     #SELF PARAMS GO PLAIN
     params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
+        all_weights[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
-    
     
     for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
-            ((1-alpha) * dissimilarity_vector[i]/dissimilarity_vector_sum + alpha * scaling_factors[i + 1]) * x for x in parameters_to_ndarrays(fit_res.parameters)
+            (all_weights[i + 1]) * x for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
     
     return params
-
 
 def aggregate_median(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     """Compute median."""
