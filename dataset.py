@@ -239,6 +239,14 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
         for i, client_id in enumerate(clients_with_data):
             client_indices[client_id].extend(class_split[i])
 
+    # Initialize matrix: rows = clients, cols = classes
+    class_client_matrix = np.zeros((num_clients, num_classes), dtype=int)
+
+    for client_id in range(num_clients):
+        client_labels = labels[client_indices[client_id]]
+        for c in range(num_classes):
+            class_client_matrix[client_id, c] = np.sum(client_labels == c)
+
     partition_len_train = [len(idxs) for idxs in client_indices]
 
     trainsets = [
@@ -282,6 +290,8 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     testloaders = [testloader] * num_clients
     ordered_testset = [len(ordered_testset)] * num_clients
 
+
+    #print(class_client_matrix)
     return trainloaders, validationloaders, testloaders, partition_len_train, ordered_testset
 
 

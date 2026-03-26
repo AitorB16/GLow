@@ -128,7 +128,7 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
 def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[List[float]], neighbours: List[int], head_id: int, current_round: int, alpha: int = 0.5) -> NDArrays:
     """Compute score weighted average."""
 
-    alpha_prima = 1.
+    alpha_prima = alpha
     #alpha = 0.5
 
     ordered_results = []
@@ -173,14 +173,13 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
     # Let's do in-place aggregation
     # Get first result, then add up each other
 
-
     weights = []
     for i in range(len(ordered_results) - 1):
         w = (1 - alpha) * dissimilarity_vector[i] + alpha * scaling_factors[i + 1]
         weights.append(w)
 
     if dissimilarity_vector_sum > 0.:
-        print(dissimilarity_vector)
+        #print(dissimilarity_vector)
         all_weights = [alpha_prima * scaling_factors[0]] + list(weights)
         all_weights = np.array(all_weights)
         all_weights = all_weights / all_weights.sum()
