@@ -15,8 +15,9 @@ class FlowerClient(fl.client.NumPyClient):
         super().__init__()
 
         self.cid = cid
-        self.trainloader = trainloader
-        self.validationloader = validationloader
+        self.validation_loaders = validationloader
+        self.trainloader = trainloader[cid]
+        self.validationloader = validationloader[cid]
         self.local_acc = None
         self.model = LeNet(num_classes)
         self.num_classes = num_classes
@@ -37,15 +38,19 @@ class FlowerClient(fl.client.NumPyClient):
         return self.local_acc
     
     def fit(self, parameters, config):
+
+        #config['nature'], should be an array of neighbors
         torch.manual_seed(config['seed'])
 
         #copy params from server in local models
         self.set_parameters(parameters)
         metrics_val_distr = None
         centroid = None
+
+        centroid_vector = []
         
         #Perform local training just in the selected node head
-        if config['local_train_cid'] == self.cid or config['local_train_cid'] == -1: # Case for GL or Case for FL
+        if config['head_cid'] == self.cid or config['head_cid'] == -1: # Case for GL or Case for FL
             lr = config['lr']
             if config['comm_round'] <= config['num_agents']: # In first n initial rounds
                 epochs = config['local_epochs'] # Option to achieve a faster converge in the first * 3 epochs
@@ -56,24 +61,31 @@ class FlowerClient(fl.client.NumPyClient):
 
             optim = torch.optim.Adam(self.model.parameters(), lr=lr)
             #local training
-            distr_loss_train, metrics_val_distr, centroid = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, config['nature'], self.device)
-        
-            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'centroid': centroid, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
-        
+            _, metrics_val_distr, centroid = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, config['nature'], self.device)
+            centroid_vector.append(centroid)
+            
+            for neighbor in config['neighbors']: #USE MY PARAMS TO COMPUTE IN OTHER NEIGH VAL SETS -> CONFIDENCE
+                if neighbor != self.cid:
+                    _, _, centroid = test(self.model, self.validation_loaders[neighbor], self.num_classes, config['nature'], self.device)
+                    centroid_vector.append(centroid)
+            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'centroid': centroid_vector, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
+        elif self.cid in config['neighbors']:
+            _, _, centroid = test(self.model, self.validation_loaders[config['head_cid']], self.num_classes, config['nature'], self.device)
+
         #Return current acc and params from neighbours
-        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'centroid': centroid,'HEAD': 'NO', 'distr_val_loss': '##', 'energy used': '10W'}
+        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': self.local_acc,'cid': self.cid, 'centroid': centroid, 'HEAD': 'NO', 'distr_val_loss': '##', 'energy used': '10W'}
 
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
+        #HERE I SHOULD COMPUTE OTHER CLIENTS PERFORMANCE
         torch.manual_seed(config['seed'])
-
         self.set_parameters(parameters)
-        loss, accuracy = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
+        loss, accuracy, _ = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
         return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
 
 def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed, device):
     def client_fn(cid: str):
-        return FlowerClient(cids[int(cid)], trainloader=trainloaders[int(cid)], validationloader=validationloaders[int(cid)], num_classes=num_classes, seed=seed, device=device).to_client()
+        return FlowerClient(cids[int(cid)], trainloader=trainloaders, validationloader=validationloaders, num_classes=num_classes, seed=seed, device=device).to_client()
     return client_fn
 
 def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
@@ -92,6 +104,7 @@ def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List
     for num_examples, m in metrics:
         acc.append(m['acc_val_distr'])
         cids.append(m['cid'])
+        centroid.append(m['centroid'])
         centroid.append(m['centroid'])
     
     # Aggregate and return custom metric (weighted average)

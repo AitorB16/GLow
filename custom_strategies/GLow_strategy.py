@@ -45,7 +45,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
 #from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_median, weighted_loss_avg
-from flwr_lib_modifications.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_centroids, aggregate_median, weighted_loss_avg
+from flwr_lib_modifications.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_centroids_1, aggregate_score_centroids_2, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -141,7 +141,7 @@ class GLow_strategy(Strategy):
         early_local_train: Optional[bool] = False,
         run_id: str,
         num_classes: int,
-        #pool_total_rounds: int, 
+        class_client_matrix: List[List[int]], 
         pool_switch_down: List[List[int]],
         pool_switch_up: List[List[int]],
         pool_switch_malicious: List[List[int]],
@@ -179,9 +179,10 @@ class GLow_strategy(Strategy):
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
-        self.centroid = [1e-6] * num_classes #Epsilon instead of 0. in order to avoid NaNs in matx calc
+        #self.centroid = [1e-6] * num_classes #Epsilon [1e-6] instead of 0. in order to avoid NaNs in matx calc
         self.run_id = run_id
         self.num_classes = num_classes
+        self.class_client_matrix = class_client_matrix
         self.seed = seed
         self.save_path = save_path
         self.early_local_train = early_local_train
@@ -193,12 +194,6 @@ class GLow_strategy(Strategy):
             for j in topology[i]:
                 self.neigh_metrics[i].append(None)
 
-        # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE NEIGH CENTROIDS
-        self.neigh_centroids = []
-        for i in range(min_available_clients):
-            self.neigh_centroids.append([])
-            for j in topology[i]:
-                self.neigh_centroids[i].append(self.centroid)
 
         # CREATE STRUCTURE TO STORE RUNTIME INFO 
         self.pool_switch_down = pool_switch_down
@@ -231,7 +226,6 @@ class GLow_strategy(Strategy):
                     self.pool_losses[agent] = None
                     self.neigh_metrics[agent] = [None]
                     self.pool_parameters[agent] = self.initial_parameters[agent]
-                    #self.neigh_centroids[agent] - RESET TOO
     
     def select_pool(self):
         search = True
@@ -375,7 +369,8 @@ class GLow_strategy(Strategy):
             if self.on_fit_config_fn is not None:
                 # Custom fit config function provided
                 config = self.on_fit_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
+            config['neighbors'] = self.get_up_neighbors()
+            config['head_cid'] = self.selected_pool
             config['comm_round'] = server_round
             config['num_agents'] = self.min_available_clients
             config['nature'] = self.pool_nature[self.selected_pool]
@@ -422,7 +417,7 @@ class GLow_strategy(Strategy):
             if self.on_evaluate_config_fn is not None:
                 # Custom fit config function provided
                 config = self.on_evaluate_config_fn(server_round)
-            config['local_train_cid'] = self.selected_pool
+            config['head_cid'] = self.selected_pool
             config['nature'] = self.pool_nature[self.selected_pool]
             config['seed'] = self.seed
 
@@ -475,8 +470,10 @@ class GLow_strategy(Strategy):
             aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool) #Trust pairs
         elif self.aggregation == 'score_neigh_params':
             aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
-        elif self.aggregation == 'score_neigh_params_centroids':
-            aggregated_ndarrays = aggregate_score_centroids(results, self.neigh_metrics[self.selected_pool], self.neigh_centroids[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, .5) #Don't trust pairs and params are locally evaluated
+        elif self.aggregation == 'approach_1':
+            aggregated_ndarrays = aggregate_score_centroids_1(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, self.num_classes, .5) #Don't trust pairs and params are locally evaluated
+        elif self.aggregation == 'approach_2':
+            aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix, self.num_classes, .33) #Don't trust pairs and params are locally evaluated
         else:
             # Does weighted average of results
             weights_results = [
@@ -495,16 +492,6 @@ class GLow_strategy(Strategy):
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No fit_metrics_aggregation_fn provided")
-
-        #SAVE CENTROIDS DATA STRUCTURE - cosine distance --  HERE? -- CHECK AND POSSIBLY UPDATE
-        self.centroid = metrics_aggregated['centroid'][metrics_aggregated['cid'].index(self.selected_pool)]
-        
-        #print(self.centroid)
-        
-        for neighbour in self.get_up_neighbors():
-            self.neigh_centroids[neighbour][self.topology[neighbour].index(self.selected_pool)] = self.centroid
-
-        #print(self.neigh_centroids)
         
 
         ######CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME######???

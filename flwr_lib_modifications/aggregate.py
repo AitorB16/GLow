@@ -25,7 +25,7 @@ import numpy as np
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from flwr.server.client_proxy import ClientProxy
 
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import pdist, cdist, squareform, euclidean, cosine
 
 
 def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
@@ -125,8 +125,8 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
     
     return params
 
-def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], centroids: List[List[float]], neighbours: List[int], head_id: int, current_round: int, alpha: int = 0.5) -> NDArrays:
-    """Compute score weighted average."""
+def aggregate_score_centroids_1(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int, current_round: int, class_number: int, alpha: int = 0.5) -> NDArrays:
+    """Compute centroids average 1."""
 
     alpha_prima = alpha
     #alpha = 0.5
@@ -137,17 +137,23 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
             if n == cli.cid:
                 ordered_results.append(results[i])
 
+    centroids = np.ones((len(neighbours), class_number))
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
+            centroids[i] = fit_res.metrics['centroid'][0] #TRAINING ONE
+        else:
+            centroids[i] = fit_res.metrics['centroid'] #NEIGHBORS
 
     dissimilarity_matrix = squareform(pdist(centroids, metric='cosine'))
     dissimilarity_vector = dissimilarity_matrix[neighbours.index(head_id)]
     dissimilarity_vector = np.clip(dissimilarity_vector, 1e-6, None)
-    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id))
+    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id)) #First row
     dissimilarity_vector_sum = sum(dissimilarity_vector)
 
     if dissimilarity_vector_sum > 0.:
         dissimilarity_vector = dissimilarity_vector/dissimilarity_vector_sum
-    
 
+    #I should now subsitute neigh_metrics
     scaling_norm = 0.
     for i, (cli, fit_res) in enumerate(ordered_results):
         if cli.cid == head_id:
@@ -198,6 +204,125 @@ def aggregate_score_centroids(results: List[Tuple[ClientProxy, FitRes]], neighbo
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
     
     return params
+
+def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neighbours: List[int], head_id: int, current_round: int, class_client_matrix: List[List[int]], class_number: int = 10, alpha: float = 0.33, beta: float = 0.33, gamma: float = 0.33) -> NDArrays:
+    # !!!!!! ALPHA SOULD BE DYNAMIC? // MAYBE I NEED WARM-UP ROUNDS?? !!!!!!
+    """Compute centroids average 2."""
+
+    #print(neighbours)
+
+    ordered_results = []
+    for n in neighbours:
+        for i, (cli, fit_res) in enumerate(results):
+            if n == cli.cid:
+                ordered_results.append(results[i])
+    
+    #SIZE
+    norm_terms_per_class = [0] * class_number
+    for i in range(class_number):
+        for neighbour in neighbours:
+            if class_client_matrix[neighbour][i] > norm_terms_per_class[i]:
+                norm_terms_per_class[i] = class_client_matrix[neighbour][i]
+    #print(norm_terms_per_class)
+
+    v_norm_size = []
+    for neighbour in neighbours:
+        v_norm_size.append(
+            np.divide(
+            np.array(class_client_matrix[neighbour]),
+            norm_terms_per_class,
+            out=np.zeros_like(norm_terms_per_class, dtype=float),
+            where=np.array(norm_terms_per_class) > 0
+            )
+        )
+    #print(v_norm_size)
+
+    #CONFIDENCE
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
+            v_conf = fit_res.metrics['centroid']
+            for j, (neighbour) in enumerate(neighbours):
+                if neighbour != head_id:
+                    for k in range(class_number):
+                        if class_client_matrix[neighbour][k] == 0 and class_client_matrix[head_id][k] == 0:
+                            v_conf[j][k] = 1.
+                        elif class_client_matrix[neighbour][k] == 0:
+                            for l, (cli_tmp, fit_res_tmp) in enumerate(ordered_results):
+                                if cli_tmp.cid == neighbour:
+                                    tmp_centroid = fit_res_tmp.metrics['centroid']
+                                    v_conf[j][k] = tmp_centroid[k]
+    
+    #print(v_conf)
+
+    #DISTANCE
+    neigh_centroids = []
+    pseudo_centroid = np.zeros(class_number) #NUM_CLASSES
+
+    for i, (cli, fit_res) in enumerate(ordered_results):
+        if cli.cid == head_id:
+            neigh_centroids.append(fit_res.metrics['centroid'][0])
+            pseudo_centroid += np.array(fit_res.metrics['centroid'][0])
+        else:
+            neigh_centroids.append(fit_res.metrics['centroid'])
+            pseudo_centroid += np.array(fit_res.metrics['centroid'])
+    
+    pseudo_centroid = pseudo_centroid/len(neighbours)
+
+    v_distance = np.ones((len(neighbours), class_number))
+
+    for i, (neighbour) in enumerate(neighbours):
+        for j in range(class_number):
+            if neighbour != head_id and class_client_matrix[neighbour][j] > 0 and class_client_matrix[head_id][j] > 0:
+                v_distance[i][j] = abs(pseudo_centroid[j] - neigh_centroids[i][j])
+
+    #print(v_distance)
+
+    #SCORE -- ALPHA, BETA, GAMMA
+    raw_score = np.zeros((len(neighbours), class_number))
+    for i, (neighbour) in enumerate(neighbours):
+        for j in range(class_number):
+            raw_score[i][j] = alpha * v_distance[i][j] + beta * v_conf[i][j] + gamma * v_norm_size[i][j]
+    
+    raw_score_sum = np.zeros(class_number)
+    for i in range(class_number):
+        for j, (neighbour) in enumerate(neighbours):
+            raw_score_sum[i] += raw_score[j][i]
+
+    v_score = np.zeros((len(neighbours), class_number))
+    for i, (neighbour) in enumerate(neighbours):
+        v_score[i] = np.divide(
+            raw_score[i],
+            raw_score_sum,
+            out=np.zeros_like(raw_score_sum, dtype=float),
+            where=np.array(raw_score_sum) > 0
+            )
+    
+    #print(v_score)
+    
+
+    #GLOBAL SCORE PER NEIGHBOR
+    global_score_client = np.zeros(len(neighbours))
+    for i, (neighbour) in enumerate(neighbours):
+        global_score_client[i] = sum(v_score[i])
+
+    weights = global_score_client.copy()
+    weights /= sum(global_score_client)
+
+    print(weights)
+
+    # Can I make a single loop?
+    params = [
+        weights[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
+    ]
+    
+    for i, (_, fit_res) in enumerate(ordered_results[1:]):
+        res = (
+            (weights[i + 1]) * x for x in parameters_to_ndarrays(fit_res.parameters)
+        )
+        params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
+    
+    return params
+
 
 def aggregate_median(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     """Compute median."""

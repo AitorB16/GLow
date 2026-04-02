@@ -94,13 +94,15 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
         inputs, labels = inputs.to(device), labels.to(device)
         # Forward Pass
         outputs = net(inputs)
+        preds = torch.max(outputs, 1)[1]
+
         # Find and calculate the Loss
         valid_loss += criterion(outputs, labels).item()
-        correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+        correct += (preds == labels).sum().item()
         total_size += labels.size(0)
 
         for c in range(num_classes):
-            centroid[c] += ((labels == c) & (torch.max(outputs.data, 1)[1] == labels).sum().item()).sum()
+            centroid[c] += ((labels == c) & (preds == labels)).sum().item()
 
     if total_size > 0:
         val_accuracy = correct / total_size
@@ -108,9 +110,13 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
         centroid[mask] /= instances_per_class[mask]
     else: #Just in case no local data -- THIS CASE NEEDS FURTHER ADDRESSING
         val_accuracy = 1. / num_classes
-        #centroid = torch.tensor([1./num_classes] * num_classes)
     
     metrics_val_distributed_fit = val_accuracy
+
+    #DELETE THIS ONE?
+    for c in range(num_classes):
+            if centroid[c] == 1.:
+                centroid[c] = 0.
 
     return train_loss, metrics_val_distributed_fit, centroid
 
@@ -120,6 +126,9 @@ def test(net, testloader, num_classes, nature, device):
     """
     criterion = nn.CrossEntropyLoss()
     correct, total_size, loss = 0, 0, 0.
+    instances_per_class = torch.tensor([0.] * num_classes)
+    centroid = torch.tensor([0.] * num_classes) #COMPUTE CENTROID USING VAL-SET
+
     net.eval()
     net.to(device)
     with torch.no_grad():
@@ -128,13 +137,25 @@ def test(net, testloader, num_classes, nature, device):
                 mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
                 #mapping = torch.tensor(np.random.randint(10, size=10))
                 labels = mapping[labels]
+
+            for c in range(num_classes):
+                instances_per_class[c]+= (labels == c).sum()
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = net(inputs)
+            preds = torch.max(outputs, 1)[1]
+
             loss += criterion(outputs, labels).item()
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+            correct += (preds == labels).sum().item()
             total_size += labels.size(0)
+
+            for c in range(num_classes):
+                centroid[c] += ((labels == c) & (preds == labels)).sum().item()
+
         if total_size > 0:
             accuracy = correct / total_size
+            mask = instances_per_class > 0
+            centroid[mask] /= instances_per_class[mask]
         else:
             accuracy = 1./num_classes
-    return loss, accuracy
+    return loss, accuracy, centroid
+

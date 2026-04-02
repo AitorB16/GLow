@@ -29,7 +29,7 @@ def get_evaluate_fn(num_classes: int, testloaders):
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         model.load_state_dict(state_dict, strict=True)
 
-        loss, accuracy = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
+        loss, accuracy, _ = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
         return loss, {'acc_cntrl': accuracy}
 
     return evaluate_fn
