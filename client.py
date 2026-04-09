@@ -38,7 +38,6 @@ class FlowerClient(fl.client.NumPyClient):
         return self.local_acc
     
     def fit(self, parameters, config):
-
         #config['nature'], should be an array of neighbors
         torch.manual_seed(config['seed'])
 

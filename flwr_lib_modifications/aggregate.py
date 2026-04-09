@@ -245,7 +245,7 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
                 if neighbour != head_id:
                     for k in range(class_number):
                         if class_client_matrix[neighbour][k] == 0 and class_client_matrix[head_id][k] == 0:
-                            v_conf[j][k] = 1.
+                            v_conf[j][k] = 0
                         elif class_client_matrix[neighbour][k] == 0:
                             for l, (cli_tmp, fit_res_tmp) in enumerate(ordered_results):
                                 if cli_tmp.cid == neighbour:
@@ -272,7 +272,7 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
 
     for i, (neighbour) in enumerate(neighbours):
         for j in range(class_number):
-            if neighbour != head_id and class_client_matrix[neighbour][j] > 0 and class_client_matrix[head_id][j] > 0:
+            if class_client_matrix[neighbour][j] > 0 and class_client_matrix[head_id][j] > 0:
                 v_distance[i][j] = abs(pseudo_centroid[j] - neigh_centroids[i][j])
 
     #print(v_distance)
@@ -281,7 +281,7 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
     raw_score = np.zeros((len(neighbours), class_number))
     for i, (neighbour) in enumerate(neighbours):
         for j in range(class_number):
-            raw_score[i][j] = alpha * v_distance[i][j] + beta * v_conf[i][j] + gamma * v_norm_size[i][j]
+            raw_score[i][j] = (v_distance[i][j]**alpha) * (v_conf[i][j]**beta) * (v_norm_size[i][j]**gamma)
     
     raw_score_sum = np.zeros(class_number)
     for i in range(class_number):
@@ -298,7 +298,6 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
             )
     
     #print(v_score)
-    
 
     #GLOBAL SCORE PER NEIGHBOR
     global_score_client = np.zeros(len(neighbours))
@@ -306,9 +305,11 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
         global_score_client[i] = sum(v_score[i])
 
     weights = global_score_client.copy()
-    weights /= sum(global_score_client)
+    sum_weights = sum(global_score_client)
+    if sum_weights > 0:
+        weights /= sum_weights
 
-    print(weights)
+    #print(weights)
 
     # Can I make a single loop?
     params = [
