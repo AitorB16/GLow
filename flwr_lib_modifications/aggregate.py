@@ -205,11 +205,10 @@ def aggregate_score_centroids_1(results: List[Tuple[ClientProxy, FitRes]], neigh
     
     return params
 
-def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neighbours: List[int], head_id: int, current_round: int, class_client_matrix: List[List[int]], class_number: int = 10, alpha: float = 0.33, beta: float = 0.33, gamma: float = 0.33) -> NDArrays:
+def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neighbours: List[int], head_id: int, current_round: int, class_client_matrix: List[List[int]], class_number: int = 10, alpha: float = 0.33, beta: float = 0.33, gamma: float = 0.33, val_ratio: float = 0.1) -> NDArrays:
     # !!!!!! ALPHA SOULD BE DYNAMIC? // MAYBE I NEED WARM-UP ROUNDS?? !!!!!!
     """Compute centroids average 2."""
-
-    #print(neighbours)
+    print(neighbours)
 
     ordered_results = []
     for n in neighbours:
@@ -245,7 +244,7 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
                 if neighbour != head_id:
                     for k in range(class_number):
                         if class_client_matrix[neighbour][k] == 0 and class_client_matrix[head_id][k] == 0:
-                            v_conf[j][k] = 0
+                            v_conf[j][k] = 0. #Before was 1.
                         elif class_client_matrix[neighbour][k] == 0:
                             for l, (cli_tmp, fit_res_tmp) in enumerate(ordered_results):
                                 if cli_tmp.cid == neighbour:
@@ -254,8 +253,11 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
     
     #print(v_conf)
 
+    #COMPUTE PSEUDO-CENTROIDS BY SUMMING CENTROIDS AND DIVIDING THEM BY THE NUMBER OF INSTANACES PER CLASS
+
     #DISTANCE
     neigh_centroids = []
+    class_client_validation = np.array(class_client_matrix[head_id] * val_ratio)
     pseudo_centroid = np.zeros(class_number) #NUM_CLASSES
 
     for i, (cli, fit_res) in enumerate(ordered_results):
@@ -266,13 +268,17 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
             neigh_centroids.append(fit_res.metrics['centroid'])
             pseudo_centroid += np.array(fit_res.metrics['centroid'])
     
-    pseudo_centroid = pseudo_centroid/len(neighbours)
+    pseudo_centroid = np.where(
+        class_client_validation > 0,
+        pseudo_centroid / class_client_validation,
+        pseudo_centroid
+    )
 
     v_distance = np.ones((len(neighbours), class_number))
 
     for i, (neighbour) in enumerate(neighbours):
         for j in range(class_number):
-            if class_client_matrix[neighbour][j] > 0 and class_client_matrix[head_id][j] > 0:
+            if neighbour != head_id and class_client_matrix[neighbour][j] > 0 and class_client_matrix[head_id][j] > 0: # // CHECK |HEAD-PSEUDO_CNTR|
                 v_distance[i][j] = abs(pseudo_centroid[j] - neigh_centroids[i][j])
 
     #print(v_distance)
@@ -309,7 +315,7 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
     if sum_weights > 0:
         weights /= sum_weights
 
-    #print(weights)
+    print(weights)
 
     # Can I make a single loop?
     params = [
@@ -323,7 +329,6 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
     
     return params
-
 
 def aggregate_median(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     """Compute median."""
