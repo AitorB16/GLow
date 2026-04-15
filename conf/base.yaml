@@ -1,7 +1,7 @@
 run_name: '0'
 aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_1', 'approach_2'
-topology: './conf/topologies/graph_8_2/custom_1.yaml'
-runtime: './conf/topologies/graph_8_2/custom_1_runtime.yaml'
+topology: './conf/topologies/graph_8_2/graph_1.yaml'
+runtime: './conf/topologies/graph_8_2/runtime.yaml'
 split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: cpu
 early_local_train: False
