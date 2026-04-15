@@ -45,7 +45,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 
 #from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_median, weighted_loss_avg
-from flwr_lib_modifications.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_centroids_1, aggregate_score_centroids_2, aggregate_median, weighted_loss_avg
+from flwr_lib_modifications.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_1, aggregate_score_centroids_2, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -467,9 +467,9 @@ class GLow_strategy(Strategy):
         if self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results)
         elif self.aggregation == 'score':
-            aggregated_ndarrays = aggregate_score(results, self.pool_metrics, self.get_up_neighbors(), self.selected_pool) #Trust pairs
-        elif self.aggregation == 'score_neigh_params':
             aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
+        elif self.aggregation == 'score_validation':
+            aggregated_ndarrays = aggregate_score_validation(results, self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'approach_1':
             aggregated_ndarrays = aggregate_score_centroids_1(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, self.num_classes, .5) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'approach_2':

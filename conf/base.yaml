@@ -1,11 +1,11 @@
 run_name: '0'
-aggregation: 'inplace' #'inplace', 'score', 'score_neigh_params', 'approach_1', 'approach_2'
+aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_1', 'approach_2'
 topology: './conf/topologies/graph_8_2/custom_1.yaml'
 runtime: './conf/topologies/graph_8_2/custom_1_runtime.yaml'
 split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: cpu
 early_local_train: False
-num_rounds: 256 #240 #512 #800 #1024
+num_rounds: 512 #240 #512 #800 #1024
 # num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 # num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
 batch_size: 32
