@@ -34,7 +34,8 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_neigh_params'*
 - **topology:** str; path to yaml file containing system topology
 - **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
-- **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*, *'prepare_dataset_niid_class_partition'*
+- **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*, *'prepare_dataset_niid_class_partition'*,
+*'skew_class_niid_train_common_test'*, *skew_class_niid_train_niid_test*
 - **device:** str; select among *CPU*, *GPU*, *H100*
 - **early_local_train:** bool; to force the system work in SL for the first *n* communication rounds before neighbor aggregation 
 - **num_rounds:** int; total number of communication rounds
@@ -138,7 +139,7 @@ This section is oriented for visualization of the results obtained from *multipl
 ## Changes in libraries
 
 Dealing with control nodes with no local data is not a Flower feature. Performing weighted average among network parameters triggers scaling factors realted issues (division by 0). Hence, *aggregate_inplace()*  method of [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py) is modified. Scaling factor for nodes with no local data is set to 1.0 -- no scaling factor applied.
-Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *aggregate_score()*, *aggregate_score_neigh_params()*.
+Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *aggregate_inplace()*, *aggregate_score()*, *aggregate_score_validation()*, *aggregate_score_centroids_1()*, *aggregate_score_centroids_2()*.
 
 If having problems with Ray Scalability (regarding dataset, python and ray versions), check [flwr/simulation/app.py](/flwr_lib_modifications/app.py).
 

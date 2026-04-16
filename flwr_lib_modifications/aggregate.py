@@ -281,9 +281,9 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
             for j, (neighbour) in enumerate(neighbours):
                 if neighbour != head_id:
                     for k in range(class_number):
-                        if class_client_matrix[neighbour][k] == 0 and class_client_matrix[head_id][k] == 0:
-                            v_conf[j][k] = 0. #Before was 1.
-                        elif class_client_matrix[neighbour][k] == 0:
+                        if class_client_matrix[neighbour][k] == 0 and class_client_matrix[head_id][k] == 0: #No instances neither head nor neighbour
+                            v_conf[j][k] = 0.
+                        elif class_client_matrix[neighbour][k] == 0: #No instances in neighbour
                             for l, (cli_tmp, fit_res_tmp) in enumerate(ordered_results):
                                 if cli_tmp.cid == neighbour:
                                     tmp_centroid = fit_res_tmp.metrics['centroid']

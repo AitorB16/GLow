@@ -107,7 +107,6 @@ def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List
         acc.append(m['acc_val_distr'])
         cids.append(m['cid'])
         centroid.append(m['centroid'])
-        centroid.append(m['centroid'])
-    
+            
     # Aggregate and return custom metric (weighted average)
     return {"acc_val_distr": acc, "cid": cids, "centroid": centroid}
