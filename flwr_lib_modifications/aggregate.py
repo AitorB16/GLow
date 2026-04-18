@@ -295,29 +295,25 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
 
     #DISTANCE
     neigh_centroids = []
-    class_client_validation = np.array(class_client_matrix[head_id] * val_ratio)
+    #class_client_validation = np.array(class_client_matrix[head_id] * val_ratio) #PROBLEMATIC?
     pseudo_centroid = np.zeros(class_number) #NUM_CLASSES
+    node_head = np.zeros(class_number)
 
     for i, (cli, fit_res) in enumerate(ordered_results):
         if cli.cid == head_id:
             neigh_centroids.append(fit_res.metrics['centroid'][0])
             pseudo_centroid += np.array(fit_res.metrics['centroid'][0])
+            node_head = fit_res.metrics['centroid'][0]
         else:
             neigh_centroids.append(fit_res.metrics['centroid'])
             pseudo_centroid += np.array(fit_res.metrics['centroid'])
-    
-    pseudo_centroid = np.where(
-        class_client_validation > 0,
-        pseudo_centroid / class_client_validation,
-        pseudo_centroid
-    )
 
     v_distance = np.ones((len(neighbours), class_number))
 
     for i, (neighbour) in enumerate(neighbours):
         for j in range(class_number):
             if neighbour != head_id and class_client_matrix[neighbour][j] > 0 and class_client_matrix[head_id][j] > 0: # // CHECK |HEAD-PSEUDO_CNTR|
-                v_distance[i][j] = abs(pseudo_centroid[j] - neigh_centroids[i][j])
+                v_distance[i][j] = abs(node_head[j] - neigh_centroids[i][j])
 
     #print(v_distance)
 
