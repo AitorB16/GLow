@@ -28,14 +28,28 @@ from flwr.server.client_proxy import ClientProxy
 from scipy.spatial.distance import pdist, cdist, squareform, euclidean, cosine
 
 
-def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
+def aggregate(results: List[Tuple[NDArrays, int]], neighbours: List[int], head_id: int) -> NDArrays:
+
+    ordered_results = []
+    for n in neighbours:
+        for i, (cli, fit_res) in enumerate(results):
+            if head_id == n and n == cli.cid:
+                ordered_results.insert(0, results[i]) #Make sure head is the at pos 0 in the structure
+            elif n == cli.cid:
+                ordered_results.append(results[i])
+
+    weights_results = [
+        (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples) #fit_res.metrics
+        for _, fit_res in ordered_results
+    ]
+    
     """Compute weighted average."""
     # Calculate the total number of examples used during training
-    num_examples_total = sum(num_examples for (_, num_examples) in results)
+    num_examples_total = sum(num_examples for (_, num_examples) in weights_results)
 
     # Create a list of weights, each multiplied by the related number of examples
     weighted_weights = [
-        [layer * num_examples for layer in weights] for weights, num_examples in results
+        [layer * num_examples for layer in weights] for weights, num_examples in weights_results
     ]
 
     # Compute average weights of each layer
@@ -46,29 +60,38 @@ def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     return weights_prime
 
 
-def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
+def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]], neighbours: List[int], head_id: int) -> NDArrays:
+
+    ordered_results = []
+    for n in neighbours:
+        for i, (cli, fit_res) in enumerate(results):
+            if head_id == n and n == cli.cid:
+                ordered_results.insert(0, results[i]) #Make sure head is the at pos 0 in the structure
+            elif n == cli.cid:
+                ordered_results.append(results[i])
+
     """Compute in-place weighted average."""
     # Count total examples
-    num_examples_total = sum(fit_res.num_examples for (_, fit_res) in results)
+    num_examples_total = sum(fit_res.num_examples for (_, fit_res) in ordered_results)
     
     # DETECT IF IS GREATER THAN 0 (i.e., NODE HAS LOCAL INSTANCES) AVOID DIVISION BY 0 (ISLANDS)
     if num_examples_total > 0:
     
     # Compute scaling factors for each result
         scaling_factors = [
-            fit_res.num_examples / num_examples_total for _, fit_res in results
+            fit_res.num_examples / num_examples_total for _, fit_res in ordered_results
         ]
     else:
         scaling_factors = [
-            1. for _, fit_res in results
+            1. for _, fit_res in ordered_results
         ]
 
     # Let's do in-place aggregation
     # Get first result, then add up each other
     params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)
+        scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
-    for i, (_, fit_res) in enumerate(results[1:]):
+    for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
             scaling_factors[i + 1] * x
             for x in parameters_to_ndarrays(fit_res.parameters)
@@ -83,9 +106,9 @@ def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics
     ordered_results = []
     for n in neighbours:
         for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
-                #print(neighbours)
-                #print(cli.cid)
+            if head_id == n and n == cli.cid:
+                ordered_results.insert(0, results[i]) #Make sure head is the at pos 0 in the structure
+            elif n == cli.cid:
                 ordered_results.append(results[i])
         
     scaling_norm = 0.
@@ -131,9 +154,9 @@ def aggregate_score_validation(results: List[Tuple[ClientProxy, FitRes]], neighb
     ordered_results = []
     for n in neighbours:
         for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
-                #print(neighbours)
-                #print(cli.cid)
+            if head_id == n and n == cli.cid:
+                ordered_results.insert(0, results[i]) #Make sure head is the at pos 0 in the structure
+            elif n == cli.cid:
                 ordered_results.append(results[i])
         
     scaling_norm = 0.
@@ -167,12 +190,13 @@ def aggregate_score_centroids_1(results: List[Tuple[ClientProxy, FitRes]], neigh
     """Compute centroids average 1."""
 
     alpha_prima = alpha
-    #alpha = 0.5
 
     ordered_results = []
     for n in neighbours:
         for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
+            if head_id == n and n == cli.cid:
+                ordered_results.insert(0, results[i]) #Make sure head is the at pos 0 in the structure
+            elif n == cli.cid:
                 ordered_results.append(results[i])
 
     centroids = np.ones((len(neighbours), class_number))
@@ -251,7 +275,9 @@ def aggregate_score_centroids_2(results: List[Tuple[ClientProxy, FitRes]], neigh
     ordered_results = []
     for n in neighbours:
         for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
+            if head_id == n and n == cli.cid:
+                ordered_results.insert(0, results[i]) #Make sure head is the at pos 0 in the structure
+            elif n == cli.cid:
                 ordered_results.append(results[i])
     
     #SIZE

@@ -187,7 +187,7 @@ class GLow_strategy(Strategy):
         self.save_path = save_path
         self.early_local_train = early_local_train
         
-        # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE LOCAL ACCURACIES AND PARAMS
+        # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE LOCAL ACCURACIES AND PARAMS -- DEPRECATE STRUCTURE?
         self.neigh_metrics = []
         for i in range(min_available_clients):
             self.neigh_metrics.append([])
@@ -463,7 +463,7 @@ class GLow_strategy(Strategy):
         #############################################################
 
         if self.aggregation == 'inplace':
-            aggregated_ndarrays = aggregate_inplace(results)
+            aggregated_ndarrays = aggregate_inplace(results, self.get_up_neighbors(), self.selected_pool)
         elif self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'score_validation':
@@ -472,15 +472,10 @@ class GLow_strategy(Strategy):
             aggregated_ndarrays = aggregate_score_centroids_1(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, self.num_classes, .5) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'approach_2':
             aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
-        else:
-            # Does weighted average of results
-            weights_results = [
-                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples) #fit_res.metrics
-                for _, fit_res in results
-            ]
-            aggregated_ndarrays = aggregate(weights_results)
-            #aggregated_ndarrays = aggregate_median(weights_results)
+        else: #Vanilla weighted average
+            aggregated_ndarrays = aggregate(results, self.get_up_neighbors(), self.selected_pool)
         
+        #Checkpoint to save parameters
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
 
         # Aggregate custom metrics if aggregation fn was provided
