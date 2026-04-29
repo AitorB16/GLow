@@ -11,7 +11,7 @@ import numpy as np
 
 import yaml
 
-from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test, prepare_dataset_niid_class_partition
+from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test, prepare_dataset_niid_class_partition
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -65,17 +65,29 @@ def main():
 
     # 2. PREAPRE YOUR DATASET
     if cfg['split_dataset'] == 'prepare_dataset_iid_train_common_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_common_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+    elif cfg['split_dataset'] == 'skew_class_niid_train_common_test':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test, class_client_matrix  = skew_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+    elif cfg['split_dataset'] == 'skew_class_niid_train_niid_test':
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test, class_client_matrix  = skew_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_iid_train_iid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_iid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_iid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_iid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_niid_test(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_class_partition':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_class_partition(num_clients, cfg.num_classes, tplgy['clients_with_no_data'], cfg.batch_size, cfg.seed)
+        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_class_partition(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+
+
+    # PARTITIONS
+    out = ''
+    out = out + ' '.join([str(partition) for partition in partitions_train]) + '\n\n'
+    out = out + ' '.join([str(partition) for partition in partitions_test]) + '\n'
+    f = open(save_path + "/partitions.out", "w")
+    f.write(out)
 
     device = cfg['device']
 
@@ -98,7 +110,8 @@ def main():
         run_id = run_id,
         early_local_train = cfg['early_local_train'],
         num_classes=cfg['num_classes'],
-        ool_switch_down=pool_switch_down,
+        class_client_matrix = class_client_matrix,
+        pool_switch_down=pool_switch_down,
         pool_switch_up=pool_switch_up,
         pool_switch_malicious=pool_switch_malicious,
         pool_status=pool_status,
@@ -125,7 +138,7 @@ def main():
         server = server,
         config=server_config,
         strategy=strategy,
-        client_resources={'num_cpus': 4, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+        client_resources={'num_cpus': 2, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
 
     # 6. SAVE RESULTS

@@ -47,7 +47,6 @@ class FlowerClient(fl.client.NumPyClient):
         centroid = None
         metrics_val_distr = 0.
 
-
         centroid_vector = []
         
         #Perform local training just in the selected node head
@@ -72,6 +71,7 @@ class FlowerClient(fl.client.NumPyClient):
             return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'centroid': centroid_vector, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
         elif self.cid in config['neighbors']:
             _, _, centroid = test(self.model, self.validation_loaders[config['head_cid']], self.num_classes, config['nature'], self.device) # To compute centroids using neigh params in head val-set
+            #<ADD METHOD - Color (KD)>
             _, metrics_val_distr, _ = test(self.model, self.validation_loaders[self.cid], self.num_classes, config['nature'], self.device) #To compute SCR / APPR1 with independent validation-sets in neighbor val-sets
         
         #Return current acc and params from neighbours

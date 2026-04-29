@@ -340,7 +340,6 @@ class GLow_strategy(Strategy):
         #self.pool_check()
         self.select_pool()
 
-
         '''Implementing abstract class'''
         class select_criterion(Criterion):
             def __init__(self, cid_list):
@@ -421,7 +420,7 @@ class GLow_strategy(Strategy):
             config['nature'] = self.pool_nature[self.selected_pool]
             config['seed'] = self.seed
 
-            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config) #POSIBLEMENTE FALLO ESTE AQUI
+            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
             pairs.append((client, evaluate_ins))
         # Return client/config pairs
         return pairs 
@@ -458,7 +457,6 @@ class GLow_strategy(Strategy):
             if neighbour == self.selected_pool:
                 self.pool_losses[self.selected_pool] = loss
                 self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
-        #############################################################
         
         #############################################################
         #SAVE CENTROIDS DATA STRUCTURE - cosine distance --  HERE? // OR INSIDE AGGRAGATION FUNC // DELETE
@@ -473,7 +471,7 @@ class GLow_strategy(Strategy):
         elif self.aggregation == 'approach_1':
             aggregated_ndarrays = aggregate_score_centroids_1(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, self.num_classes, .5) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'approach_2':
-            aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix, self.num_classes, .33) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
         else:
             # Does weighted average of results
             weights_results = [

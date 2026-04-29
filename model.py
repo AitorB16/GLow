@@ -113,7 +113,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
     
     metrics_val_distributed_fit = val_accuracy
 
-    #DELETE THIS ONE?
+    #DELETE?
     for c in range(num_classes):
             if centroid[c] == 1.:
                 centroid[c] = 0.
