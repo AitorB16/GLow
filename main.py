@@ -63,6 +63,8 @@ def main():
         pool_status.append(client_runtime['status'])
         pool_nature.append(client_runtime['nature'])
 
+    class_client_matrix = [[]]
+
     # 2. PREAPRE YOUR DATASET
     if cfg['split_dataset'] == 'prepare_dataset_iid_train_common_test':
         trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
