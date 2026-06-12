@@ -78,7 +78,7 @@ class FlowerClient(fl.client.NumPyClient):
         )
 
         # Head client branch
-        if config['head_cid'] == self.cid or config['head_cid'] == -1:
+        if config['head_cid'] == self.cid:
             print("======HERE==== HEAD", config['head_cid'], "====cid===", self.cid)
             return self.get_parameters({}), len(self.trainloader), {
                 'acc_val_distr': metrics_val_distr,
@@ -167,7 +167,7 @@ class FlowerClient(fl.client.NumPyClient):
         centroid_vector = []
         
         #Perform local training just in the selected node head
-        if config['head_cid'] == self.cid or config['head_cid'] == -1: # Case for GL or Case for FL
+        if config['head_cid'] == self.cid:
             lr = config['lr']
             if config['comm_round'] <= config['num_agents']: # In first n initial rounds
                 epochs = config['local_epochs'] # Option to achieve a faster converge in the first * 3 epochs
