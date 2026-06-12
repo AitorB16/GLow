@@ -159,3 +159,37 @@ def test(net, testloader, num_classes, nature, device):
             accuracy = 1./num_classes
     return loss, accuracy, centroid
 
+def compute_prob_matrix(net, testloader, num_classes, nature, device):
+    """Validate the network and return:
+       - matrix (num_classes x num_classes):
+         mean predicted probability vector per true class
+    """
+
+    instances_per_class = torch.zeros(num_classes, device=device)
+    prob_matrix = torch.zeros((num_classes, num_classes), device=device)
+
+    net.eval()
+    net.to(device)
+
+    with torch.no_grad():
+        for inputs, labels in testloader:
+            if nature == 'malicious':  # FLIP LABEL
+                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0], device=labels.device)
+                labels = mapping[labels]
+
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            outputs = net(inputs)
+            probs = F.softmax(outputs, dim=1)
+
+            # accumulate counts
+            instances_per_class += torch.bincount(labels, minlength=num_classes).float()
+
+            # accumulate probability vectors per class
+            prob_matrix.index_add_(0, labels, probs)
+
+        # normalize to get means
+        mask = instances_per_class > 0
+        prob_matrix[mask] /= instances_per_class[mask].unsqueeze(1)
+
+    return prob_matrix

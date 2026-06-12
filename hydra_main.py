@@ -159,11 +159,11 @@ def main(cfg: DictConfig):
     #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
 
     print('#################')
-    print(str(history.losses_distributed))
+    #print(str(history.losses_distributed))
     print('#################')
-    print(str(history.losses_centralized))
+    #print(str(history.losses_centralized))
     print('#################')
-    print(str(history.metrics_distributed_fit)) #validation
+    #print(str(history.metrics_distributed_fit)) #validation
     print('#################')
     print(str(history.metrics_distributed))
     print('#################')
