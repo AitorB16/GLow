@@ -282,12 +282,12 @@ class GLow_strategy(Strategy):
         out = ''
         for cli_ID in range(self.min_available_clients):
             out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
-        f = open(self.save_path + str(self.run_id) + "_pool.out", "w")
+        f = open(self.save_path + str(self.run_id) + "_heads.out", "w")
         f.write(out)
         f.close()
         # save parameters
         param_path = self.save_path + 'parameters/'
-        os.makedirs(param_path)
+        os.makedirs(param_path, exist_ok=True)
         for cli_ID in range(self.min_available_clients):
             net = LeNet(self.num_classes)
             cli_params_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])

@@ -26,9 +26,10 @@ def main():
     start_time = time.time()
 
     conf_file = sys.argv[1]
-    run_id = sys.argv[2]
-    tplgy_file = sys.argv[3]
-    runtime_file = sys.argv[4]
+    tplgy_file = sys.argv[2]
+    runtime_file = sys.argv[3]
+    run_id = sys.argv[4]
+
 
     with open(conf_file, 'r') as file:
         cfg = yaml.safe_load(file)
@@ -88,7 +89,7 @@ def main():
     out = ''
     out = out + ' '.join([str(partition) for partition in partitions_train]) + '\n\n'
     out = out + ' '.join([str(partition) for partition in partitions_test]) + '\n'
-    f = open(save_path + "/partitions.out", "w")
+    f = open(save_path + "/" + run_id + "_partitions.out", "w")
     f.write(out)
 
     device = cfg['device']
@@ -164,14 +165,14 @@ def main():
     out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
     out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']])
     out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
-    f = open(save_path + "/raw.out", "w")
+    f = open(save_path + "/" + run_id + "_raw.out", "w")
     f.write(out)
     f.close()
     
     acc_distr = ''
-    for i in range(cfg.num_rounds):
+    for i in range(cfg['num_rounds']):
         acc_distr = acc_distr + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr'][i][1]])+'\n'
-    f = open(save_path + "/acc_distr.out", "w")
+    f = open(save_path + "/" + run_id + "_acc_distr.out", "w")
     f.write(acc_distr)
     f.close()
     
@@ -179,7 +180,7 @@ def main():
     out = ''
     out = out + ' '.join([str(partition) for partition in partitions_train]) + '\n\n'
     out = out + ' '.join([str(partition) for partition in partitions_test]) + '\n'
-    f = open(save_path + "/partitions.out", "w")
+    f = open(save_path + "/" + run_id + "_partitions.out", "w")
     f.write(out)
 
 if __name__ == "__main__":
