@@ -462,7 +462,7 @@ class GLow_strategy(Strategy):
         #############################################################
 
         if self.aggregation == 'inplace':
-            aggregated_ndarrays = aggregate_inplace(results, self.get_up_neighbors(), self.selected_pool)
+            aggregated_ndarrays = aggregate_inplace(results)
         elif self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'score_validation':
