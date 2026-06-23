@@ -218,23 +218,6 @@ def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[
         cids.append(m['cid'])
     # Aggregate and return custom metric (weighted average)
     return {"acc_distr": acc, "cid": cids}
-####Ferdinand
-def cli_val_distr_ferdos_to_review(metrics_list):
-    confidence_all = []
-    prob_matrix_all = []
-    for m in metrics_list:
-        # Collect confidence vectors
-        if 'confidence' in m:
-            confidence_all.append(m['confidence'])
-        else:
-            confidence_all.append([0.5] * 10)  # fallback
-
-        # Collect prob_matrices
-        if 'prob_matrix' in m:
-            prob_matrix_all.append(m['prob_matrix'])
-        else:
-            prob_matrix_all.append(np.zeros((10,)))
-    return confidence_all, prob_matrix_all
 
 def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
     acc = []
