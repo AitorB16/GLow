@@ -52,8 +52,8 @@ class FlowerClient(fl.client.NumPyClient):
         class_client_matrix = {self.cid: val_counts}
 
         # Determine number of epochs
-        if int(config['comm_round']) <= 7:
-            epochs = 15
+        if int(config['comm_round']) <= config['num_agents']:
+            epochs = 1
             print(f" -> Client {self.cid}: Warm-up Phase Active! Training for {epochs} epochs.")
         elif config['nature'] == 'malicious':
             epochs = config['local_epochs']
@@ -69,7 +69,6 @@ class FlowerClient(fl.client.NumPyClient):
             self.model, self.trainloader, self.validationloader,
             optim, epochs, self.num_classes, config['nature'], self.device
         )
-        #centroid = [centroid]
 
         # Prob matrix always evaluated on head validation set
         prob_matrix = compute_prob_matrix(
@@ -90,17 +89,17 @@ class FlowerClient(fl.client.NumPyClient):
                 'distr_val_loss': '##',
                 'energy used': '10W'
             }
-
+        
         # Neighbour clients branch
         elif self.cid in config['neighbors']:
             # Step 1: neighbour's own centroid
-            _, _, neighbour_centroid = test(
+            _, _, neighbour_centroid, _, _ = test(
                 self.model, self.validation_loaders[self.cid],
                 self.num_classes, config['nature'], self.device
             )
 
             # Step 2: head's centroid
-            _, _, head_centroid = test(
+            _, _, head_centroid, _, _ = test(
                 self.model, self.validation_loaders[config['head_cid']],
                 self.num_classes, config['nature'], self.device
             )
@@ -151,59 +150,13 @@ class FlowerClient(fl.client.NumPyClient):
                 'energy used': '10W'
             }
 
-
-    #############################################################################################
-    def fit_aitor(self, parameters, config):
-
-        #config['nature'], should be an array of neighbors
-        torch.manual_seed(config['seed'])
-
-        #copy params from server in local models
-        self.set_parameters(parameters)
-        metrics_val_distr = None
-        centroid = None
-        metrics_val_distr = 0.
-
-        centroid_vector = []
-        
-        #Perform local training just in the selected node head
-        if config['head_cid'] == self.cid:
-            lr = config['lr']
-            if config['comm_round'] <= config['num_agents']: # In first n initial rounds
-                epochs = config['local_epochs'] # Option to achieve a faster converge in the first * 3 epochs
-            elif config['nature'] == 'malicious':
-                epochs = config['local_epochs']#*5
-            else:
-                epochs = config['local_epochs']
-
-            optim = torch.optim.Adam(self.model.parameters(), lr=lr)
-            #local training
-            _, metrics_val_distr, centroid = train(self.model, self.trainloader, self.validationloader, optim, epochs, self.num_classes, config['nature'], self.device)
-            centroid_vector.append(centroid)
-            prob_matrix = compute_prob_matrix(self.model, self.validation_loaders[config['head_cid']], self.num_classes, config['nature'], self.device) # To compute centroids using neigh params in head val-set
-            
-            for neighbor in config['neighbors']: #USE MY PARAMS TO COMPUTE IN OTHER NEIGH VAL SETS -> CONFIDENCE
-                if neighbor != self.cid:
-                    _, _, centroid = test(self.model, self.validation_loaders[neighbor], self.num_classes, config['nature'], self.device)
-                    centroid_vector.append(centroid)
-            return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'centroid': centroid_vector, 'prob_matrix': prob_matrix, 'HEAD': 'YES', 'distr_val_loss': '##', 'energy used': '10W'}
-        elif self.cid in config['neighbors']:
-            _, _, centroid = test(self.model, self.validation_loaders[config['head_cid']], self.num_classes, config['nature'], self.device) # To compute centroids using neigh params in head val-set
-            prob_matrix = compute_prob_matrix(self.model, self.validation_loaders[config['head_cid']], self.num_classes, config['nature'], self.device) # To compute centroids using neigh params in head val-set
-            #print('MC')
-            #print(prob_matrix)
-            _, metrics_val_distr, _ = test(self.model, self.validation_loaders[self.cid], self.num_classes, config['nature'], self.device) #To compute SCR / APPR1 with independent validation-sets in neighbor val-sets
-
-        #Return current acc and params from neighbours
-        return self.get_parameters({}), len(self.trainloader), {'acc_val_distr': metrics_val_distr,'cid': self.cid, 'centroid': centroid, 'prob_matrix': prob_matrix, 'HEAD': 'NO', 'distr_val_loss': '##', 'energy used': '10W'}
-
     #Evaluate global model in validation set of a particular client
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         #HERE I SHOULD COMPUTE OTHER CLIENTS PERFORMANCE
         torch.manual_seed(config['seed'])
         self.set_parameters(parameters)
-        loss, accuracy, _ = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
-        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
+        loss, accuracy, _, macro_f1, preds_per_class = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
+        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'macro_f1': macro_f1 ,'preds_per_class': preds_per_class, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
 
 def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed, device):
     def client_fn(cid: str):

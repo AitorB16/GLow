@@ -11,7 +11,7 @@ import numpy as np
 
 import yaml
 
-from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test, prepare_dataset_niid_class_partition
+from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -63,34 +63,22 @@ def main():
         pool_switch_malicious.append(client_runtime['malicious'])
         pool_status.append(client_runtime['status'])
         pool_nature.append(client_runtime['nature'])
-
-    class_client_matrix = [[]]
-
+    
     # 2. PREAPRE YOUR DATASET
     if cfg['split_dataset'] == 'prepare_dataset_iid_train_common_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'skew_class_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test, class_client_matrix  = skew_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'skew_class_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test, class_client_matrix  = skew_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_iid_train_iid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_iid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
-    elif cfg['split_dataset'] == 'prepare_dataset_niid_class_partition':
-        trainloaders, validationloaders, testloaders, partitions_train, partitions_test = prepare_dataset_niid_class_partition(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
-
-
-    # PARTITIONS
-    out = ''
-    out = out + ' '.join([str(partition) for partition in partitions_train]) + '\n\n'
-    out = out + ' '.join([str(partition) for partition in partitions_test]) + '\n'
-    f = open(save_path + "/" + run_id + "_partitions.out", "w")
-    f.write(out)
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
 
     device = cfg['device']
 
@@ -113,7 +101,7 @@ def main():
         run_id = run_id,
         early_local_train = cfg['early_local_train'],
         num_classes=cfg['num_classes'],
-        class_client_matrix = class_client_matrix,
+        class_client_matrix_train = class_client_matrix_train,
         pool_switch_down=pool_switch_down,
         pool_switch_up=pool_switch_up,
         pool_switch_malicious=pool_switch_malicious,
@@ -163,25 +151,19 @@ def main():
     
     out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']])
+    out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n**macro_f1: ' + ' '.join([str(elem) for elem in history.metrics_centralized['macro_f1']])
     out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
-    f = open(save_path + "/" + run_id + "_raw.out", "w")
+    f = open(save_path + run_id + "_raw.out", "w")
     f.write(out)
-    f.close()
-    
-    acc_distr = ''
-    for i in range(cfg['num_rounds']):
-        acc_distr = acc_distr + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr'][i][1]])+'\n'
-    f = open(save_path + "/" + run_id + "_acc_distr.out", "w")
-    f.write(acc_distr)
     f.close()
     
     # PARTITIONS
-    out = ''
-    out = out + ' '.join([str(partition) for partition in partitions_train]) + '\n\n'
-    out = out + ' '.join([str(partition) for partition in partitions_test]) + '\n'
-    f = open(save_path + "/" + run_id + "_partitions.out", "w")
-    f.write(out)
+    with open(save_path + run_id + "_partitions.out", "w") as f:
+        for row in class_client_matrix_train:
+            f.write(" ".join(map(str, row)) + "\n")
+        f.write("\n")
+        for row in class_client_matrix_test:
+            f.write(" ".join(map(str, row)) + "\n")
 
 if __name__ == "__main__":
     main()

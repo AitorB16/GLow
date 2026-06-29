@@ -1,4 +1,5 @@
 import torch
+import torchmetrics
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -46,7 +47,8 @@ class LeNet(nn.Module):
       x = self.dropout1(x) # Applying dropout b/t layers which exchange highest parameters. This is a good practice
       x = self.fc2(x)
       return x
-    
+
+
 def train(net, trainloader, validationloader, optimizer, epochs, num_classes, nature, device):
     """Train the network on the training set.
     This is a fairly simple training loop for PyTorch.
@@ -124,6 +126,8 @@ def test(net, testloader, num_classes, nature, device):
     """Validate the network on the entire test set.
     and report loss and accuracy.
     """
+    f1 = torchmetrics.classification.MulticlassF1Score(num_classes=num_classes, average='macro')
+
     criterion = nn.CrossEntropyLoss()
     correct, total_size, loss = 0, 0, 0.
     instances_per_class = torch.tensor([0.] * num_classes)
@@ -151,13 +155,22 @@ def test(net, testloader, num_classes, nature, device):
             for c in range(num_classes):
                 centroid[c] += ((labels == c) & (preds == labels)).sum().item()
 
+        preds_per_class = np.zeros((num_classes, num_classes), dtype=int)
+        for i in range(num_classes):
+            for j in range(num_classes):
+                preds_per_class[i][j] += ((labels == i) & (preds == j)).sum().item()
+
         if total_size > 0:
             accuracy = correct / total_size
             mask = instances_per_class > 0
             centroid[mask] /= instances_per_class[mask]
         else:
             accuracy = 1./num_classes
-    return loss, accuracy, centroid
+
+        macro_f1 = f1(preds, labels).item()
+        #print(f"F1 scores: {macro_f1}\n")
+
+    return loss, accuracy, centroid, macro_f1, preds_per_class
 
 def compute_prob_matrix(net, testloader, num_classes, nature, device):
     """Validate the network and return:

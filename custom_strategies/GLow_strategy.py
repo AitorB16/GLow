@@ -140,7 +140,7 @@ class GLow_strategy(Strategy):
         early_local_train: Optional[bool] = False,
         run_id: str,
         num_classes: int,
-        class_client_matrix: List[List[int]], 
+        class_client_matrix_train: List[List[int]], 
         pool_switch_down: List[List[int]],
         pool_switch_up: List[List[int]],
         pool_switch_malicious: List[List[int]],
@@ -178,10 +178,12 @@ class GLow_strategy(Strategy):
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
         self.pool_metrics = [None] * self.min_available_clients
         self.pool_losses = [None] * self.min_available_clients
+        self.pool_f1 = [None] * self.min_available_clients
+        self.pool_preds_per_class = [np.zeros((num_classes, num_classes), dtype=int) for _ in range(self.min_available_clients)]
         #self.centroid = [1e-6] * num_classes #Epsilon [1e-6] instead of 0. in order to avoid NaNs in matx calc
         self.run_id = run_id
         self.num_classes = num_classes
-        self.class_client_matrix = class_client_matrix
+        self.class_client_matrix_train = class_client_matrix_train
         self.seed = seed
         self.save_path = save_path
         self.early_local_train = early_local_train
@@ -223,6 +225,8 @@ class GLow_strategy(Strategy):
                     self.topology[agent] = [agent] #STOP RECEIVING INFO FROM NETWORK
                     self.pool_metrics[agent] = None
                     self.pool_losses[agent] = None
+                    self.pool_f1[agent] = None
+                    self.pool_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
                     self.neigh_metrics[agent] = [None]
                     self.pool_parameters[agent] = self.initial_parameters[agent]
     
@@ -281,12 +285,19 @@ class GLow_strategy(Strategy):
     def save_results(self):
         out = ''
         for cli_ID in range(self.min_available_clients):
-            out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + '\n'
+            out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + ' f1: ' +str(self.pool_f1[cli_ID]) + '\n'
         f = open(self.save_path + str(self.run_id) + "_heads.out", "w")
         f.write(out)
         f.close()
+
+        with open(self.save_path + str(self.run_id) + "_result_matrix.out", "w") as f:
+            for cli_ID in range(self.min_available_clients):
+                for row in self.pool_preds_per_class[cli_ID]:
+                    f.write(" ".join(map(str, row)) + "\n")
+                f.write("\n")
+
         # save parameters
-        param_path = self.save_path + 'parameters/'
+        param_path = self.save_path + str(self.run_id) + '_parameters/'
         os.makedirs(param_path, exist_ok=True)
         for cli_ID in range(self.min_available_clients):
             net = LeNet(self.num_classes)
@@ -323,6 +334,8 @@ class GLow_strategy(Strategy):
             if neighbour == self.selected_pool:
                 self.pool_losses[self.selected_pool] = loss
                 self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+                self.pool_f1[self.selected_pool] = metrics['macro_f1']
+                self.pool_preds_per_class[self.selected_pool] = metrics['preds_per_class']
                 head_loss = loss
                 head_metrics = metrics
         
@@ -456,6 +469,8 @@ class GLow_strategy(Strategy):
             if neighbour == self.selected_pool:
                 self.pool_losses[self.selected_pool] = loss
                 self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
+                self.pool_f1[self.selected_pool] = metrics['macro_f1']
+                self.pool_preds_per_class[self.selected_pool] = metrics['preds_per_class']
         
         #############################################################
         #SAVE CENTROIDS DATA STRUCTURE - cosine distance --  HERE? // OR INSIDE AGGRAGATION FUNC // DELETE
@@ -470,9 +485,9 @@ class GLow_strategy(Strategy):
         elif self.aggregation == 'approach_1':
             aggregated_ndarrays = aggregate_score_centroids_1(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, self.num_classes, .5) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'approach_2':
-            aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix_train, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
         elif self.aggregation == 'approach_3':
-            aggregated_ndarrays = aggregate_score_grad_orthog(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score_grad_orthog(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix_train, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
         else: #Vanilla weighted average
             aggregated_ndarrays = aggregate(results, self.get_up_neighbors(), self.selected_pool)
         

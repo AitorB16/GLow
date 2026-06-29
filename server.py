@@ -24,12 +24,15 @@ def get_evaluate_fn(num_classes: int, testloaders):
         
         model = LeNet(num_classes)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #device = torch.device("mps")
 
         params_dict = zip(model.state_dict().keys(), parameters)
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         model.load_state_dict(state_dict, strict=True)
 
-        loss, accuracy, _ = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
-        return loss, {'acc_cntrl': accuracy}
+        loss, accuracy, _, macro_f1, preds = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
+        
+        #ADD HERE METHOD TO IMPLEMENT WITH VAL/LOADERS? NOPE
+        return loss, {'acc_cntrl': accuracy, 'macro_f1': macro_f1, 'preds_per_class': preds}
 
     return evaluate_fn
