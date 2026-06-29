@@ -113,11 +113,11 @@ Example:
 ## Results
 The output of each experiment consists in the following files:
 
-- **pool.out:** Accuracies and Losses obtained by each pool (node head) after *n* communication rounds
+-**partitions.out:** Training and test matrices containing number of instances per class per agent.
+-**result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics.
+- **heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
 - **raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *Exec_time*
 - **parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
-
-> Note: **acc_distr.out:** Contains distributed accuracies obtained by each agent per communication round -- parsed version of raw.out for visualization purposes.
 
 ### Executions with Hydra
 Hydra creates a nested directory with current date and times at the moment experiments are launched. Additional files and directories are created in this execution variant
