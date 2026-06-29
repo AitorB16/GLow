@@ -116,7 +116,7 @@ The output of each experiment consists in the following files:
 - **partitions.out:** Training and test matrices containing number of instances per class per agent
 - **result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics
 - **heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
-- **raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *Exec_time*
+- **raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *macro_f1*, *Exec_time*
 - **parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
 
 ### Executions with Hydra
