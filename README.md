@@ -89,6 +89,7 @@ For experiments that involve multiple graphs; e.g., adding edges to an specific 
 ```sh
 sh mult_exp.sh main.py <conf_file.yaml> <run_time_file.yaml> <run_name> <number_of_runs>
 ```
+Example:
 ```sh
 ./mult_exp.sh main.py conf/topologies/graph_8_2/base.yaml conf/topologies/graph_8_2/runtime.yaml graph_8_2 4
 ```
@@ -103,6 +104,7 @@ Following the same structure of [mult_exp.sh](./mult_exp.sh), script [sing_run.s
 ```sh
 sh sing_exp.sh main.py <conf_file.yaml> <run_time_file.yaml> <run_name>  <specific topology ID>
 ```
+Example:
 ```sh
 ./sing_exp.sh main.py conf/topologies/graph_8_2/base.yaml conf/topologies/graph_8_2/runtime.yaml graph_8_2 1
 ```
