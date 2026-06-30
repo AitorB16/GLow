@@ -71,7 +71,7 @@ class FlowerClient(fl.client.NumPyClient):
         )
 
         # Prob matrix always evaluated on head validation set
-        prob_matrix = compute_prob_matrix(
+        prob_matrix, _ = compute_prob_matrix(
             self.model, self.validation_loaders[config['head_cid']],
             self.num_classes, config['nature'], self.device
         )
@@ -93,13 +93,13 @@ class FlowerClient(fl.client.NumPyClient):
         # Neighbour clients branch
         elif self.cid in config['neighbors']:
             # Step 1: neighbour's own centroid
-            _, _, neighbour_centroid, _, _ = test(
+            _, _, neighbour_centroid, _ = test(
                 self.model, self.validation_loaders[self.cid],
                 self.num_classes, config['nature'], self.device
             )
 
             # Step 2: head's centroid
-            _, _, head_centroid, _, _ = test(
+            _, _, head_centroid, _ = test(
                 self.model, self.validation_loaders[config['head_cid']],
                 self.num_classes, config['nature'], self.device
             )
@@ -155,8 +155,8 @@ class FlowerClient(fl.client.NumPyClient):
         #HERE I SHOULD COMPUTE OTHER CLIENTS PERFORMANCE
         torch.manual_seed(config['seed'])
         self.set_parameters(parameters)
-        loss, accuracy, _, macro_f1, preds_per_class = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
-        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'macro_f1': macro_f1 ,'preds_per_class': preds_per_class, 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
+        loss, accuracy, _, macro_f1 = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
+        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'macro_f1': macro_f1 , 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
 
 def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed, device):
     def client_fn(cid: str):

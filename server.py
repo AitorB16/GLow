@@ -1,5 +1,6 @@
 from collections import OrderedDict
-from model import LeNet, test
+from model import LeNet, test, compute_prob_matrix
+import numpy as np
 import torch
 
 def get_on_fit_config(config):
@@ -30,9 +31,11 @@ def get_evaluate_fn(num_classes: int, testloaders):
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         model.load_state_dict(state_dict, strict=True)
 
-        loss, accuracy, _, macro_f1, preds = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
+        loss, accuracy, _, macro_f1 = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
+        _, preds_per_class = compute_prob_matrix(model, testloaders[sid], num_classes, config['nature'], device) # To compute centroids using neigh params in head val-set
+
         
         #ADD HERE METHOD TO IMPLEMENT WITH VAL/LOADERS? NOPE
-        return loss, {'acc_cntrl': accuracy, 'macro_f1': macro_f1, 'preds_per_class': preds}
+        return loss, {'acc_cntrl': accuracy, 'macro_f1': macro_f1, 'preds_per_class': np.array(preds_per_class)}
 
     return evaluate_fn

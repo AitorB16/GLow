@@ -155,11 +155,6 @@ def test(net, testloader, num_classes, nature, device):
             for c in range(num_classes):
                 centroid[c] += ((labels == c) & (preds == labels)).sum().item()
 
-        preds_per_class = np.zeros((num_classes, num_classes), dtype=int)
-        for i in range(num_classes):
-            for j in range(num_classes):
-                preds_per_class[i][j] += ((labels == i) & (preds == j)).sum().item()
-
         if total_size > 0:
             accuracy = correct / total_size
             mask = instances_per_class > 0
@@ -170,7 +165,7 @@ def test(net, testloader, num_classes, nature, device):
         macro_f1 = f1(preds, labels).item()
         #print(f"F1 scores: {macro_f1}\n")
 
-    return loss, accuracy, centroid, macro_f1, preds_per_class
+    return loss, accuracy, centroid, macro_f1
 
 def compute_prob_matrix(net, testloader, num_classes, nature, device):
     """Validate the network and return:
@@ -180,6 +175,7 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
 
     instances_per_class = torch.zeros(num_classes, device=device)
     prob_matrix = torch.zeros((num_classes, num_classes), device=device)
+    preds_matrix = torch.zeros((num_classes, num_classes), device=device, dtype=int) #Is it optimized for device?
 
     net.eval()
     net.to(device)
@@ -195,14 +191,21 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
             outputs = net(inputs)
             probs = F.softmax(outputs, dim=1)
 
+            preds = outputs.argmax(dim=1)
+
+            preds_matrix += torch.bincount(
+                labels * num_classes + preds,
+                minlength=num_classes * num_classes,
+            ).reshape(num_classes, num_classes)
+
             # accumulate counts
             instances_per_class += torch.bincount(labels, minlength=num_classes).float()
 
             # accumulate probability vectors per class
             prob_matrix.index_add_(0, labels, probs)
-
+            
         # normalize to get means
         mask = instances_per_class > 0
         prob_matrix[mask] /= instances_per_class[mask].unsqueeze(1)
 
-    return prob_matrix
+    return prob_matrix, preds_matrix

@@ -306,7 +306,7 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
 
     for client_id in range(num_clients):
         client_labels_train = labels_train[client_indices[client_id]]
-        client_labels_test = labels_test[client_indices[client_id]]
+        client_labels_test = labels_test
         for c in range(num_classes):
             class_client_matrix_train[client_id, c] = np.sum(client_labels_train == c)
             class_client_matrix_test[client_id, c] = np.sum(client_labels_test == c)
