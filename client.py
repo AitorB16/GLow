@@ -53,7 +53,7 @@ class FlowerClient(fl.client.NumPyClient):
 
         # Determine number of epochs
         if int(config['comm_round']) <= config['num_agents']:
-            epochs = 1
+            epochs = 15
             print(f" -> Client {self.cid}: Warm-up Phase Active! Training for {epochs} epochs.")
         elif config['nature'] == 'malicious':
             epochs = config['local_epochs']
