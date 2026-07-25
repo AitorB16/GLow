@@ -12,12 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Topology based GL [Belenguer et al., 2025] strategy.
+"""Topology-based decentralized gossip learning strategy [Belenguer et al., 2025].
 
 Manuscript: ###############
+
+Rotating-head design: each round one node in `topology` is head
+(`select_head`), its up-neighbours train from the head's parameters
+(`get_up_neighbors`), `aggregate_fit` folds results back into
+`self.head_parameters[head]`. `head_switch_*`/`head_check` schedule nodes
+going up/down/malicious per round.
 """
 
 import os
+import json
 import flwr
 import numpy as np
 from collections import OrderedDict
@@ -43,13 +50,14 @@ from flwr.common import (
 from flwr.common.logger import log
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
+from flwr.server.history import History
 
-from flwr_lib_modifications.aggregate import aggregate, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_1, aggregate_score_centroids_2, aggregate_score_grad_orthog, aggregate_median, weighted_loss_avg
+from flwr_lib_modifications.aggregate import aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_1, aggregate_score_centroids_2, aggregate_median, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
 
-from flwr.common.typing import GetParametersIns
+from flwr.common.typing import GetParametersIns, GetPropertiesIns
 
 
 WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW = """
@@ -62,54 +70,9 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 # pylint: disable=line-too-long
 class GLow_strategy(Strategy):
-    """Decentralized Averaging strategy.
+    """Decentralized gossip-learning strategy. https://arxiv.org/abs/2501.10463
 
-    Implementation based on https://arxiv.org/abs/2501.10463
-
-    Parameters
-    ----------
-    total_rounds: int
-        Total number of communication rounds for the whole system
-    topology: List[List[int]]
-        List containing all the node heads with their corresponding list of neighbor nodes
-    fraction_fit : float, optional
-        Fraction of clients used during training. In case `min_fit_clients`
-        is larger than `fraction_fit * available_clients`, `min_fit_clients`
-        will still be sampled. Defaults to 1.0.
-    fraction_evaluate : float, optional
-        Fraction of clients used during validation. In case `min_evaluate_clients`
-        is larger than `fraction_evaluate * available_clients`,
-        `min_evaluate_clients` will still be sampled. Defaults to 1.0.
-    min_fit_clients : int, optional
-        Minimum number of clients used during training. Defaults to 2.
-    min_evaluate_clients : int, optional
-        Minimum number of clients used during validation. Defaults to 2.
-    min_available_clients : int, optional
-        Minimum number of total clients in the system. Defaults to 2.
-    evaluate_fn : Optional[Callable[[int, NDArrays, Dict[str, Scalar]],Optional[Tuple[float, Dict[str, Scalar]]]]]
-        Optional function used for validation. Defaults to None.
-    on_fit_config_fn : Callable[[int], Dict[str, Scalar]], optional
-        Function used to configure training. Defaults to None.
-    on_evaluate_config_fn : Callable[[int], Dict[str, Scalar]], optional
-        Function used to configure validation. Defaults to None.
-    accept_failures : bool, optional
-        Whether or not accept rounds containing failures. Defaults to True.
-    initial_parameters : List of Parameters, optional
-        List of initial model parameters per head.
-    pool_parameters: List of Parameters, optional
-        List of model parameters per head, updated during the training.
-    fit_metrics_aggregation_fn : Optional[MetricsAggregationFn]
-        Metrics aggregation function, optional.
-    evaluate_metrics_aggregation_fn : Optional[MetricsAggregationFn]
-        Metrics aggregation function, optional.
-    early_local_train: bool, optional
-        SL for a fixed number of local rounds before starting communicating with other neighbors
-    inplace: bool. Defaults to True
-        Does in-place weighted average of results
-    run_id: str
-        Run name
-    save_path: str
-        Path to save achieved results
+    See module docstring for the rotating-head mechanic.
     """
 
     # pylint: disable=too-many-arguments,too-many-instance-attributes, line-too-long
@@ -121,8 +84,8 @@ class GLow_strategy(Strategy):
         topology: List[List[int]],
         fraction_fit: float = 1.0,
         fraction_evaluate: float = 1.0,
-        min_fit_clients: int = 2, #Varible num subject to topology, (default value) not initialized here
-        min_evaluate_clients: int = 2, #Varible num subject to topology, (default value) not initialized here
+        min_fit_clients: int = 2, # overwritten per-round from topology
+        min_evaluate_clients: int = 2, # overwritten per-round from topology
         min_available_clients: int = 2,
         evaluate_fn: Optional[
             Callable[
@@ -134,20 +97,21 @@ class GLow_strategy(Strategy):
         on_evaluate_config_fn: Optional[Callable[[int], Dict[str, Scalar]]] = None,
         accept_failures: bool = True,
         initial_parameters: Optional[List[Parameters]] = None,
-        pool_parameters: Optional[List[Parameters]] = None,
+        head_parameters: Optional[List[Parameters]] = None,
         fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
         evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
-        early_local_train: Optional[bool] = False,
         run_id: str,
         num_classes: int,
-        class_client_matrix_train: List[List[int]], 
-        pool_switch_down: List[List[int]],
-        pool_switch_up: List[List[int]],
-        pool_switch_malicious: List[List[int]],
-        pool_status: List[str],
-        pool_nature: List[str],
+        class_client_matrix_train: List[List[int]],
+        head_switch_down: List[List[int]],
+        head_switch_up: List[List[int]],
+        head_switch_malicious: List[List[int]],
+        head_status: List[str],
+        head_nature: List[str],
         seed: int,
-        save_path: str
+        save_path: str,
+        warmup_rounds: Optional[int] = None,
+        warmup_epochs: int = 15,
     ) -> None:
         super().__init__()
 
@@ -158,7 +122,7 @@ class GLow_strategy(Strategy):
             log(WARNING, WARNING_MIN_AVAILABLE_CLIENTS_TOO_LOW)
 
         self.total_rounds = total_rounds
-        self.current_round = 0 #REPLACE BY server_round
+        self.current_round = 0
         self.topology = topology
         self.aggregation = aggregation
         self.fraction_fit = fraction_fit
@@ -166,29 +130,29 @@ class GLow_strategy(Strategy):
         self.min_fit_clients = min_fit_clients
         self.min_evaluate_clients = min_evaluate_clients
         self.min_available_clients = min_available_clients
-        self.client_list = np.arange(min_available_clients)
+        self.client_list = np.arange(min_available_clients).tolist()
         self.evaluate_fn = evaluate_fn
         self.on_fit_config_fn = on_fit_config_fn
         self.on_evaluate_config_fn = on_evaluate_config_fn
         self.accept_failures = accept_failures
         self.initial_parameters = initial_parameters
-        self.pool_parameters = pool_parameters
-        self.selected_pool = None
+        self.head_parameters = head_parameters
+        self.selected_head = None
         self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
-        self.pool_metrics = [None] * self.min_available_clients
-        self.pool_losses = [None] * self.min_available_clients
-        self.pool_f1 = [None] * self.min_available_clients
-        self.pool_preds_per_class = [np.zeros((num_classes, num_classes), dtype=int) for _ in range(self.min_available_clients)]
-        #self.centroid = [1e-6] * num_classes #Epsilon [1e-6] instead of 0. in order to avoid NaNs in matx calc
+        self.head_metrics = [None] * self.min_available_clients
+        self.head_losses = [None] * self.min_available_clients
+        self.head_f1 = [None] * self.min_available_clients
+        self.head_preds_per_class = [np.zeros((num_classes, num_classes), dtype=int) for _ in range(self.min_available_clients)]
         self.run_id = run_id
         self.num_classes = num_classes
         self.class_client_matrix_train = class_client_matrix_train
         self.seed = seed
         self.save_path = save_path
-        self.early_local_train = early_local_train
-        
-        # CREATE STRUCTURE LIST OF LISTS. NEIGHBOURS IN EACH NODE TO STORE LOCAL ACCURACIES AND PARAMS -- DEPRECATE STRUCTURE?
+        self.warmup_rounds = warmup_rounds
+        self.warmup_epochs = warmup_epochs
+
+        # per-node list of neighbour accuracies/params
         self.neigh_metrics = []
         for i in range(min_available_clients):
             self.neigh_metrics.append([])
@@ -196,163 +160,209 @@ class GLow_strategy(Strategy):
                 self.neigh_metrics[i].append(None)
 
 
-        # CREATE STRUCTURE TO STORE RUNTIME INFO 
-        self.pool_switch_down = pool_switch_down
-        self.pool_switch_up = pool_switch_up
-        self.pool_switch_malicious = pool_switch_malicious
-        self.pool_status = pool_status
-        self.pool_nature = pool_nature
+        self.head_switch_down = head_switch_down
+        self.head_switch_up = head_switch_up
+        self.head_switch_malicious = head_switch_malicious
+        self.head_status = head_status
+        self.head_nature = head_nature
+
+        # ClientProxy.cid -> topology index; opaque simulation id, not the
+        # index itself, so this map has to be built once (initialize_parameters).
+        self._cid_to_index: Dict[str, int] = {}
+
+        # run_simulation() discards Server.fit()'s History, so we accumulate
+        # an equivalent one ourselves.
+        self.history = History()
+
+        # Caches aggregate_fit()'s per-neighbour eval so evaluate() doesn't
+        # redo it (except the head, whose parameters just changed).
+        self._last_eval_results = {}
+
+    def _round_seed(self, server_round: int, node_index: int) -> int:
+        """Per-(round, node) seed offset -- keeps RNG state independent of
+        client scheduling order under worker-process reuse."""
+        return self.seed + server_round * 10_000 + node_index
+
+    def _cids_for_indices(self, indices) -> List[str]:
+        """cid for each topology index (reverse lookup via _cid_to_index)."""
+        index_set = set(indices)
+        return [cid for cid, idx in self._cid_to_index.items() if idx in index_set]
 
     def get_up_neighbors(self):
-        neighbors = self.topology[self.selected_pool]
+        """Online neighbours of the current head; includes the head itself."""
+        neighbors = self.topology[self.selected_head]
         up_neighbors = []
         for neighbor in neighbors:
-            if self.pool_status[neighbor] == 'up':
+            if self.head_status[neighbor] == 'up':
                 up_neighbors.append(neighbor)
         return up_neighbors
 
-    def pool_check(self):
+    def head_check(self):
+        """Apply this round's scheduled up/down/malicious transitions."""
         for agent in self.client_list:
-            if self.pool_switch_up[agent] is not None:
-                if self.current_round in self.pool_switch_up[agent]:
-                    self.pool_status[agent] = 'up'
-            if self.pool_switch_down[agent] is not None:
-                if self.current_round in self.pool_switch_down[agent]:
-                    self.pool_status[agent] = 'down'
-            if self.pool_switch_malicious[agent] is not None:
-                if self.current_round in self.pool_switch_malicious[agent]:
-                    self.pool_nature[agent] = 'malicious'
-                    self.topology[agent] = [agent] #STOP RECEIVING INFO FROM NETWORK
-                    self.pool_metrics[agent] = None
-                    self.pool_losses[agent] = None
-                    self.pool_f1[agent] = None
-                    self.pool_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
+            if self.head_switch_up[agent] is not None:
+                if self.current_round in self.head_switch_up[agent]:
+                    self.head_status[agent] = 'up'
+            if self.head_switch_down[agent] is not None:
+                if self.current_round in self.head_switch_down[agent]:
+                    self.head_status[agent] = 'down'
+            if self.head_switch_malicious[agent] is not None:
+                if self.current_round in self.head_switch_malicious[agent]:
+                    self.head_nature[agent] = 'malicious'
+                    self.topology[agent] = [agent]
+                    self.head_metrics[agent] = None
+                    self.head_losses[agent] = None
+                    self.head_f1[agent] = None
+                    self.head_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
                     self.neigh_metrics[agent] = [None]
-                    self.pool_parameters[agent] = self.initial_parameters[agent]
-    
-    def select_pool(self):
+                    self.head_parameters[agent] = self.initial_parameters[agent]
+
+    def select_head(self):
+        """Rotate to this round's head (first online node in client_list)
+        and advance current_round."""
         search = True
-        while search: #POSSIBLE ISSUE IF ALL AGENTS DOWN, AT LEAST 1 UP
-            self.selected_pool = self.client_list[0]
-            self.pool_check()
-            if self.pool_status[self.selected_pool] == 'up':
+        while search:
+            self.selected_head = self.client_list[0]
+            self.head_check()
+            if self.head_status[self.selected_head] == 'up':
                 search = False
             else:
-                self.client_list = np.roll(self.client_list, -1).tolist() #pick first rotate list
-        self.client_list = np.roll(self.client_list, -1).tolist() #roll list for next rounds
+                self.client_list = np.roll(self.client_list, -1).tolist()
+        self.client_list = np.roll(self.client_list, -1).tolist()
         self.current_round += 1
 
     def __repr__(self) -> str:
-        """Compute a string representation of the strategy."""
         rep = f"FedAvg(accept_failures={self.accept_failures})"
         return rep
 
-      
     def num_fit_clients(self, num_available_clients: int) -> Tuple[int, int]:
-        """Return the sample size and the required number of available clients."""
         num_clients = int(num_available_clients * self.fraction_fit)
-        '''Custom num clients depending on connection graph'''
-        self.min_fit_clients = len(self.topology[self.selected_pool])
+        self.min_fit_clients = len(self.topology[self.selected_head])
         return max(num_clients, self.min_fit_clients), self.min_available_clients
 
     def num_evaluation_clients(self, num_available_clients: int) -> Tuple[int, int]:
-        """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
-        '''Custom num clients depending on connection graph'''
-        self.min_evaluate_clients = len(self.topology[self.selected_pool])
+        self.min_evaluate_clients = len(self.topology[self.selected_head])
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
-    
+
 
     def initialize_parameters(
         self, client_manager: ClientManager
     ) -> Optional[Parameters]:
-        """Initialize global model parameters."""
-        clients = client_manager.sample(self.min_available_clients) #Sample all clients
+        """Learn each client's topology index, seed head_parameters, pick
+        round 1's head."""
+        clients = client_manager.sample(self.min_available_clients)
+
+        props_ins = GetPropertiesIns(config={})
+        for client in clients:
+            props_res = client.get_properties(ins=props_ins, timeout=None, group_id=0)
+            self._cid_to_index[client.cid] = int(props_res.properties["partition_id"])
+
         ins = GetParametersIns(config={})
-        
+
         if self.initial_parameters is None:
             self.initial_parameters = [None] * self.min_available_clients
-            self.pool_parameters = [None] * self.min_available_clients
+            self.head_parameters = [None] * self.min_available_clients
 
             for client in clients:
-                self.initial_parameters[client.cid] = client.get_parameters(ins=ins, timeout=None).parameters
-                self.pool_parameters[client.cid] = self.initial_parameters[client.cid]
-        
-        self.select_pool()
-        initial_parameters = self.initial_parameters[self.selected_pool]
+                index = self._cid_to_index[client.cid]
+                self.initial_parameters[index] = client.get_parameters(ins=ins, timeout=None, group_id=0).parameters
+                self.head_parameters[index] = self.initial_parameters[index]
+
+        self.select_head()
+        initial_parameters = self.initial_parameters[self.selected_head]
         return initial_parameters
 
     def save_results(self):
+        """Write <run_id>_heads.out, _result_matrix.out, and per-node
+        _parameters/<id>.pth."""
         out = ''
         for cli_ID in range(self.min_available_clients):
-            out = out + 'pool_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.pool_losses[cli_ID]) + ' acc: ' + str(self.pool_metrics[cli_ID]) + ' f1: ' +str(self.pool_f1[cli_ID]) + '\n'
+            out = out + 'head_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.head_losses[cli_ID]) + ' acc: ' + str(self.head_metrics[cli_ID]) + ' f1: ' +str(self.head_f1[cli_ID]) + '\n'
         f = open(self.save_path + str(self.run_id) + "_heads.out", "w")
         f.write(out)
         f.close()
 
         with open(self.save_path + str(self.run_id) + "_result_matrix.out", "w") as f:
             for cli_ID in range(self.min_available_clients):
-                for row in self.pool_preds_per_class[cli_ID]:
+                for row in self.head_preds_per_class[cli_ID]:
                     f.write(" ".join(map(str, row)) + "\n")
                 f.write("\n")
 
-        # save parameters
         param_path = self.save_path + str(self.run_id) + '_parameters/'
         os.makedirs(param_path, exist_ok=True)
         for cli_ID in range(self.min_available_clients):
             net = LeNet(self.num_classes)
-            cli_params_ndarrays = parameters_to_ndarrays(self.pool_parameters[self.selected_pool])
-            # Convert `List[np.ndarray]` to PyTorch`state_dict`
+            cli_params_ndarrays = parameters_to_ndarrays(self.head_parameters[cli_ID])
             params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
             state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
             net.load_state_dict(state_dict, strict=True)
-            # Save the model
             torch.save(net.state_dict(), param_path + str(cli_ID) + '.pth')
 
-    #EVALUATE PARAM PROPAGATION NEIGH (INDEPENDENT TESTSETS)
     def evaluate(
         self, server_round: int, parameters: Parameters
     ) -> Optional[Tuple[float, Dict[str, Scalar]]]:
-        """Evaluate model parameters using an evaluation function."""
+        """Re-evaluate this round's up-neighbours; return the head's own
+        (loss, metrics)."""
 
         if self.evaluate_fn is None:
-            # No evaluation function provided
             return None
-        
-        for neighbour in self.get_up_neighbors():
-            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
-            config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
-            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
-            
-            if eval_res is None:
-                return None
-            
-            loss, metrics = eval_res
-            self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
 
-            # Track each pool metrics and results
-            if neighbour == self.selected_pool:
-                self.pool_losses[self.selected_pool] = loss
-                self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
-                self.pool_f1[self.selected_pool] = metrics['macro_f1']
-                self.pool_preds_per_class[self.selected_pool] = metrics['preds_per_class']
+        # Set when neighbour == selected_head; every topology row must
+        # include its own index (see module docstring).
+        head_loss = None
+        head_metrics = None
+
+        up_neighbours = self.get_up_neighbors()
+        for i, neighbour in enumerate(up_neighbours):
+            # Reuse aggregate_fit()'s eval for every neighbour except the
+            # head, whose parameters it just changed.
+            if neighbour != self.selected_head and neighbour in self._last_eval_results:
+                loss, metrics = self._last_eval_results[neighbour]
+            else:
+                parameters_ndarrays = parameters_to_ndarrays(self.head_parameters[neighbour])
+                config = {'nature': self.head_nature[self.selected_head], 'seed': self._round_seed(server_round, neighbour)}
+                eval_res = self.evaluate_fn(self.selected_head, server_round, parameters_ndarrays, config)
+
+                if eval_res is None:
+                    return None
+
+                loss, metrics = eval_res
+                self._last_eval_results[neighbour] = (loss, metrics)
+
+            self.neigh_metrics[self.selected_head][i] = metrics['acc_cntrl']
+
+            if neighbour == self.selected_head:
+                self.head_losses[self.selected_head] = loss
+                self.head_metrics[self.selected_head] = metrics['acc_cntrl']
+                self.head_f1[self.selected_head] = metrics['macro_f1']
+                self.head_preds_per_class[self.selected_head] = metrics['preds_per_class']
                 head_loss = loss
                 head_metrics = metrics
-        
-        # Save pool results and parameters in last rounds
+
+        if head_loss is None:
+            raise RuntimeError(
+                f"Node {self.selected_head} is head this round but its own topology "
+                f"row (topology[{self.selected_head}]) doesn't include its own index "
+                "among its up neighbours -- every row must list itself."
+            )
+
         if server_round == self.total_rounds:
             self.save_results()
-        
+
+        self.history.add_loss_centralized(server_round=server_round, loss=head_loss)
+        self.history.add_metrics_centralized(server_round=server_round, metrics=head_metrics)
+
         return head_loss, head_metrics
 
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, FitIns]]:
-        
-        #self.pool_check()
-        self.select_pool()
+        """Rotate head, build one FitIns per up-neighbour from the head's
+        parameters."""
 
-        '''Implementing abstract class'''
+        self.select_head()
+
         class select_criterion(Criterion):
             def __init__(self, cid_list):
                 self.cid_list = cid_list
@@ -362,80 +372,64 @@ class GLow_strategy(Strategy):
         connections = self.get_up_neighbors()
 
         clients = client_manager.sample(
-            num_clients=len(connections), criterion=select_criterion(connections)
+            num_clients=len(connections), criterion=select_criterion(self._cids_for_indices(connections))
         )
 
-        # SORT CLIENTS FOR FUTURE AGGREGATIONS -- DEPRECATED??
-        sorted_clients = []
-        for neigh in connections:
-            for client in clients:
-                if neigh == client.cid:
-                    sorted_clients.append(client)
-
-        
-        """Configure the next round of training."""
+        # Dispatch order doesn't matter -- every aggregate_* consumer
+        # re-sorts by neighbour index (flwr_lib_modifications/aggregate.py).
         pairs = []
-        for client in sorted_clients:
+        for client in clients:
+            index = self._cid_to_index[client.cid]
             config = {}
             if self.on_fit_config_fn is not None:
-                # Custom fit config function provided
                 config = self.on_fit_config_fn(server_round)
-            config['neighbors'] = self.get_up_neighbors()
-            config['head_cid'] = self.selected_pool
+            # neighbour ids JSON-encoded -- legacy config bridge only allows scalars
+            config['neighbors'] = json.dumps(connections)
+            config['head_cid'] = self.selected_head
             config['comm_round'] = server_round
-            config['num_agents'] = self.min_available_clients
-            config['nature'] = self.pool_nature[self.selected_pool]
-            config['seed'] = self.seed
+            config['warmup_rounds'] = self.warmup_rounds
+            config['warmup_epochs'] = self.warmup_epochs
+            config['nature'] = self.head_nature[self.selected_head]
+            config['seed'] = self._round_seed(server_round, index)
 
-            fit_ins = FitIns(self.pool_parameters[client.cid], config)
+            fit_ins = FitIns(self.head_parameters[index], config)
             pairs.append((client, fit_ins))
-        # Return client/config pairs
         return pairs
 
     def configure_evaluate(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
     ) -> List[Tuple[ClientProxy, EvaluateIns]]:
-        
-        '''Implementing abstract class'''
+        """Per up-neighbour EvaluateIns for its own current
+        (pre-aggregation) parameters."""
+
         class select_criterion(Criterion):
             def __init__(self, cid_list):
                 self.cid_list = cid_list
             def select(self, client: ClientProxy) -> bool:
-                return client.cid in self.cid_list     
+                return client.cid in self.cid_list
 
-        """Configure the next round of evaluation."""
-        # Do not configure federated evaluation if fraction eval is 0.
         if self.fraction_evaluate == 0.0:
             return []
-        
+
         connections = self.get_up_neighbors()
 
         clients = client_manager.sample(
-            num_clients=len(connections), criterion=select_criterion(connections)
+            num_clients=len(connections), criterion=select_criterion(self._cids_for_indices(connections))
         )
 
-        # SORT CLIENTS FOR FUTURE AGGREGATIONS
-        sorted_clients = []
-        for neigh in connections:
-            for client in clients:
-                if neigh == client.cid:
-                    sorted_clients.append(client)
-
-        # Parameters and config
         pairs = []
-        for client in sorted_clients:
+        for client in clients:
+            index = self._cid_to_index[client.cid]
             config = {}
             if self.on_evaluate_config_fn is not None:
-                # Custom fit config function provided
                 config = self.on_evaluate_config_fn(server_round)
-            config['head_cid'] = self.selected_pool
-            config['nature'] = self.pool_nature[self.selected_pool]
-            config['seed'] = self.seed
+            config['head_cid'] = self.selected_head
+            config['nature'] = self.head_nature[self.selected_head]
+            config['seed'] = self._round_seed(server_round, index)
 
-            evaluate_ins = EvaluateIns(self.pool_parameters[client.cid], config)
+            evaluate_ins = EvaluateIns(self.head_parameters[index], config)
             pairs.append((client, evaluate_ins))
-        # Return client/config pairs
-        return pairs 
+        return pairs
 
     def aggregate_fit(
         self,
@@ -443,72 +437,73 @@ class GLow_strategy(Strategy):
         results: List[Tuple[ClientProxy, FitRes]],
         failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
-        """Aggregate fit results using weighted average."""
+        """Fold up-neighbours' fit results into the head's new parameters
+        via self.aggregation (flwr_lib_modifications/aggregate.py)."""
         if not results:
             return None, {}
-        
-        # Do not aggregate if there are failures and failures are not accepted
+
         if not self.accept_failures and failures:
             return None, {}
 
 
-        #############################################################
-        #CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME -- REDUNDANT?
-        for neighbour in self.get_up_neighbors():
-            parameters_ndarrays = parameters_to_ndarrays(self.pool_parameters[neighbour]) #GET CUSTOM PARAMS
-            config = {'nature': self.pool_nature[self.selected_pool], 'seed': self.seed}
-            eval_res = self.evaluate_fn(self.selected_pool, server_round, parameters_ndarrays, config) #CALL CUSTOM FUNC
-            
-            #THIS MUST BE INSIDE LOOP!!! CHECK BECAUSE ONLY AFFECTS FIRST ROUND...
-            if eval_res is None:
-                return None
-            loss, metrics = eval_res
-            self.neigh_metrics[self.selected_pool][self.get_up_neighbors().index(neighbour)] = metrics['acc_cntrl']
+        # Re-evaluate each up-neighbour's pre-aggregation parameters to
+        # refresh neigh_metrics (trust signal for the strategies below).
+        up_neighbours = self.get_up_neighbors()
+        for i, neighbour in enumerate(up_neighbours):
+            parameters_ndarrays = parameters_to_ndarrays(self.head_parameters[neighbour])
+            config = {'nature': self.head_nature[self.selected_head], 'seed': self._round_seed(server_round, neighbour)}
+            eval_res = self.evaluate_fn(self.selected_head, server_round, parameters_ndarrays, config)
 
-            # Track each pool metrics and results
-            if neighbour == self.selected_pool:
-                self.pool_losses[self.selected_pool] = loss
-                self.pool_metrics[self.selected_pool] = metrics['acc_cntrl']
-                self.pool_f1[self.selected_pool] = metrics['macro_f1']
-                self.pool_preds_per_class[self.selected_pool] = metrics['preds_per_class']
-        
-        #############################################################
-        #SAVE CENTROIDS DATA STRUCTURE - cosine distance --  HERE? // OR INSIDE AGGRAGATION FUNC // DELETE
-        #############################################################
+            if eval_res is None:
+                return None, {}
+            loss, metrics = eval_res
+            self._last_eval_results[neighbour] = (loss, metrics)
+            self.neigh_metrics[self.selected_head][i] = metrics['acc_cntrl']
+
+            if neighbour == self.selected_head:
+                self.head_losses[self.selected_head] = loss
+                self.head_metrics[self.selected_head] = metrics['acc_cntrl']
+                self.head_f1[self.selected_head] = metrics['macro_f1']
+                self.head_preds_per_class[self.selected_head] = metrics['preds_per_class']
+
+        # ClientProxy.cid is an opaque simulation id, not the topology index
+        # -- translate via _cid_to_index.
+        results_by_index = {
+            self._cid_to_index[cli.cid]: fit_res for cli, fit_res in results
+        }
 
         if self.aggregation == 'inplace':
-            aggregated_ndarrays = aggregate_inplace(results)
+            aggregated_ndarrays = aggregate_inplace(results_by_index)
         elif self.aggregation == 'score':
-            aggregated_ndarrays = aggregate_score(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head)
         elif self.aggregation == 'score_validation':
-            aggregated_ndarrays = aggregate_score_validation(results, self.get_up_neighbors(), self.selected_pool) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score_validation(results_by_index, up_neighbours, self.selected_head)
         elif self.aggregation == 'approach_1':
-            aggregated_ndarrays = aggregate_score_centroids_1(results, self.neigh_metrics[self.selected_pool], self.get_up_neighbors(), self.selected_pool, self.current_round, self.num_classes, .5) #Don't trust pairs and params are locally evaluated
+            aggregated_ndarrays = aggregate_score_centroids_1(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head, self.current_round, self.num_classes, .5)
         elif self.aggregation == 'approach_2':
-            aggregated_ndarrays = aggregate_score_centroids_2(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix_train, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
-        elif self.aggregation == 'approach_3':
-            aggregated_ndarrays = aggregate_score_grad_orthog(results, self.get_up_neighbors(), self.selected_pool, self.current_round, self.class_client_matrix_train, self.num_classes, .33, 0.33, 0.33) #Don't trust pairs and params are locally evaluated
-        else: #Vanilla weighted average
-            aggregated_ndarrays = aggregate(results, self.get_up_neighbors(), self.selected_pool)
-        
-        #Checkpoint to save parameters
+            aggregated_ndarrays = aggregate_score_centroids_2(results_by_index, up_neighbours, self.selected_head, self.current_round, self.class_client_matrix_train, self.num_classes, 0.4, 0.6, 0.)
+        else:
+            # aggregate() has a different signature -- surface unknown
+            # aggregation values explicitly instead of a confusing TypeError.
+            raise ValueError(
+                f"Unknown aggregation strategy '{self.aggregation}'. Expected one of: "
+                "'inplace', 'score', 'score_validation', 'approach_1', 'approach_2'."
+            )
+
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
 
-        # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.fit_metrics_aggregation_fn:
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
-        elif server_round == 1:  # Only log this warning once
+        elif server_round == 1:
             log(WARNING, "No fit_metrics_aggregation_fn provided")
-        
 
-        ######CHECK IF NEIGHBOR IS MALICIOUS SIMULATION RUNTIME######???
+        # Only the head's own parameters are updated -- neighbours keep
+        # theirs until a round where they're themselves head.
+        self.head_parameters[self.selected_head] = parameters_aggregated
 
-        self.pool_parameters[self.selected_pool] = parameters_aggregated
-
-        '''Spread knowledge to other clients'''
-        #No point updating local network parameter of the neighbors with the local average and model
+        self.history.add_metrics_distributed_fit(server_round=server_round, metrics=metrics_aggregated)
 
         return parameters_aggregated, metrics_aggregated
 
@@ -518,26 +513,26 @@ class GLow_strategy(Strategy):
         results: List[Tuple[ClientProxy, EvaluateRes]],
         failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
     ) -> Tuple[Optional[float], Dict[str, Scalar]]:
-        """Aggregate evaluation losses using weighted average."""
+        """Weighted-average configure_evaluate()'s per-neighbour loss/metrics."""
         if not results:
             return None, {}
-        # Do not aggregate if there are failures and failures are not accepted
         if not self.accept_failures and failures:
             return None, {}
 
-        # Aggregate loss
         loss_aggregated = weighted_loss_avg(
             [
                 (evaluate_res.num_examples, evaluate_res.loss)
                 for _, evaluate_res in results
             ]
         )
-        # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.evaluate_metrics_aggregation_fn:
             eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
-        elif server_round == 1:  # Only log this warning once
+        elif server_round == 1:
             log(WARNING, "No evaluate_metrics_aggregation_fn provided")
+
+        self.history.add_loss_distributed(server_round=server_round, loss=loss_aggregated)
+        self.history.add_metrics_distributed(server_round=server_round, metrics=metrics_aggregated)
 
         return loss_aggregated, metrics_aggregated

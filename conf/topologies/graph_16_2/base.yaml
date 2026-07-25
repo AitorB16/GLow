@@ -4,15 +4,15 @@ aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_1', 'a
 runtime: './runtime.yaml'
 split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: cpu
-early_local_train: False
+warmup_rounds: 0
+warmup_epochs: 15
 # num_clients_per_round_fit: 2 #Doesn't matter - controlled by topology
 # num_clients_per_round_eval: 2 #Doesn't matter - controlled by topology
-num_rounds: 2040
+num_rounds: 1024
 batch_size: 128
 num_classes: 10 #output layer size
-balance_data: False
 seed: 1999
 config_fit:
   lr: 0.0001
   momentum: 0.9
-  local_epochs: 2
+  local_epochs: 32

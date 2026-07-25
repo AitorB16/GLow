@@ -1,121 +1,121 @@
-pools:
-  p0:
+heads:
+  h0:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p1:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-
-  p2:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p3:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p4:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p5:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p6:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p7:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p8:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p9:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p10:
-    down:
-    up:
-    malicious:
-    status: up #up, down
-    nature: OK #OK, malicious, empty
-  p11:
+  h1:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
 
-  p12:
+  h2:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p13:
+  h3:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p14:
+  h4:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p15:
+  h5:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p16:
+  h6:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p17:
+  h7:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p18:
+  h8:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p19:
+  h9:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h10:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h11:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+
+  h12:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h13:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h14:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h15:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h16:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h17:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h18:
+    down:
+    up:
+    malicious:
+    status: up #up, down
+    nature: OK #OK, malicious, empty
+  h19:
     down:
     up:
     malicious:

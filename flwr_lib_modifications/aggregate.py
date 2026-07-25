@@ -14,17 +14,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Aggregation functions for strategy implementations."""
-# mypy: disallow_untyped_calls=False
+"""Aggregation functions vendored from `flwr.server.strategy.aggregate`,
+extended with GLow's trust-weighted strategies, dispatched by
+GLow_strategy.aggregate_fit() via `self.aggregation`:
+
+- `aggregate_inplace` ('inplace'): plain sample-count-weighted average.
+- `aggregate_score`/`aggregate_score_validation`: weight by each
+  neighbour's own accuracy (centralized / self-reported).
+- `aggregate_score_centroids_1` ('approach_1'): centroid cosine
+  dissimilarity blended with `aggregate_score`-style weighting.
+- `aggregate_score_centroids_2` ('approach_2'): per-class distance/
+  confidence/size score.
+
+`results` is `{topology_index: FitRes}` -- built via `_cid_to_index` since
+ClientProxy.cid is an opaque simulation id, not the topology index.
+
+`aggregate_median` onward is Flower's original Byzantine-robust code,
+unused by GLow_strategy.
+"""
 
 from functools import reduce
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import numpy as np
 import json
 
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
-from flwr.server.client_proxy import ClientProxy
 
 from scipy.spatial.distance import pdist, cdist, squareform, euclidean, cosine
 
@@ -47,29 +62,25 @@ def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     return weights_prime
 
 
-def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
+def aggregate_inplace(results: Dict[int, FitRes]) -> NDArrays:
     """Compute in-place weighted average."""
-    # Count total examples
-    num_examples_total = sum(fit_res.num_examples for (_, fit_res) in results)
-    
-    # DETECT IF IS GREATER THAN 0 (i.e., NODE HAS LOCAL INSTANCES) AVOID DIVISION BY 0 (ISLANDS)
+    fit_results = list(results.values())
+    num_examples_total = sum(fit_res.num_examples for fit_res in fit_results)
+
     if num_examples_total > 0:
-    
-    # Compute scaling factors for each result
         scaling_factors = [
-            fit_res.num_examples / num_examples_total for _, fit_res in results
+            fit_res.num_examples / num_examples_total for fit_res in fit_results
         ]
     else:
+        # avoid divide-by-zero for islands (no local data)
         scaling_factors = [
-            1. for _, fit_res in results
+            1. for fit_res in fit_results
         ]
 
-    # Let's do in-place aggregation
-    # Get first result, then add up each other
     params = [
-        scaling_factors[0] * x for x in parameters_to_ndarrays(results[0][1].parameters)
+        scaling_factors[0] * x for x in parameters_to_ndarrays(fit_results[0].parameters)
     ]
-    for i, (_, fit_res) in enumerate(results[1:]):
+    for i, fit_res in enumerate(fit_results[1:]):
         res = (
             scaling_factors[i + 1] * x
             for x in parameters_to_ndarrays(fit_res.parameters)
@@ -78,124 +89,105 @@ def aggregate_inplace(results: List[Tuple[ClientProxy, FitRes]]) -> NDArrays:
     return params
 
 
-def aggregate_score(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
-    """Compute score weighted average using test-sets / common challenge."""
+def aggregate_score(results: Dict[int, FitRes], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
+    """Weighted average where each neighbour's weight is its own centralized
+    test-set accuracy from `neighbour_metrics` (the head instead uses its own
+    just-reported `acc_val_distr`, since it has no `neighbour_metrics` entry
+    for itself). Weights normalized to sum to 1."""
 
-    ordered_results = []
-    for n in neighbours:
-        for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
-                #print(neighbours)
-                #print(cli.cid)
-                ordered_results.append(results[i])
-        
+    ordered_results = [(n, results[n]) for n in neighbours if n in results]
+
     scaling_norm = 0.
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        if cli.cid == head_id:
+    for i, (idx, fit_res) in enumerate(ordered_results):
+        if idx == head_id:
             scaling_norm += fit_res.metrics['acc_val_distr']
         else:
             if neighbour_metrics[i] is not None:
                 scaling_norm += neighbour_metrics[i]
 
-    # AVOID DIVISION BY 0
-    if scaling_norm == 0:
-        scaling_norm = 1.0
-
-    scaling_factors = []
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        if cli.cid == head_id:
-            scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
-        else:
-            if neighbour_metrics[i] is not None:
-                scaling_factors.append(neighbour_metrics[i] / scaling_norm)
+    if scaling_norm > 0:
+        scaling_factors = []
+        for i, (idx, fit_res) in enumerate(ordered_results):
+            if idx == head_id:
+                scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
             else:
-                scaling_factors.append(0.)
-
-    # Let's do in-place aggregation
-    # Get first result, then add up each other
+                if neighbour_metrics[i] is not None:
+                    scaling_factors.append(neighbour_metrics[i] / scaling_norm)
+                else:
+                    scaling_factors.append(0.)
+    else:
+        # no usable accuracy signal from anyone -- equal weighting instead
+        # of silently zeroing out the aggregated model
+        scaling_factors = [1. / len(ordered_results)] * len(ordered_results)
 
     params = [
         scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
-    
     for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
             scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
-    
     return params
 
-def aggregate_score_validation(results: List[Tuple[ClientProxy, FitRes]], neighbours: List[int], head_id: int) -> NDArrays:
-    """Compute score weighted average using validation sets."""
+def aggregate_score_validation(results: Dict[int, FitRes], neighbours: List[int], head_id: int) -> NDArrays:
+    """Like `aggregate_score`, but every participant (including the head) is
+    weighted by its own self-reported `acc_val_distr` -- cheaper (no extra
+    evaluation pass) but trusts each client's own report."""
 
-    ordered_results = []
-    for n in neighbours:
-        for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
-                #print(neighbours)
-                #print(cli.cid)
-                ordered_results.append(results[i])
-        
+    ordered_results = [(n, results[n]) for n in neighbours if n in results]
+
     scaling_norm = 0.
-    for i, (cli, fit_res) in enumerate(ordered_results):
+    for i, (idx, fit_res) in enumerate(ordered_results):
         scaling_norm += fit_res.metrics['acc_val_distr']
 
-    # AVOID DIVISION BY 0
-    if scaling_norm == 0:
-        scaling_norm = 1.0
-
-    scaling_factors = []
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
-
-    # Let's do in-place aggregation
-    # Get first result, then add up each other
+    if scaling_norm > 0:
+        scaling_factors = [
+            fit_res.metrics['acc_val_distr'] / scaling_norm for _, fit_res in ordered_results
+        ]
+    else:
+        # everyone self-reported 0 accuracy -- equal weighting
+        scaling_factors = [1. / len(ordered_results)] * len(ordered_results)
 
     params = [
         scaling_factors[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
-    
     for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
             scaling_factors[i + 1] * x for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
-    
     return params
 
-def aggregate_score_centroids_1(results: List[Tuple[ClientProxy, FitRes]], neighbour_metrics: List[float], neighbours: List[int], head_id: int, current_round: int, class_number: int, alpha: int = 0.5) -> NDArrays:
-    """Compute centroids average 1."""
+def aggregate_score_centroids_1(results: Dict[int, FitRes], neighbour_metrics: List[float], neighbours: List[int], head_id: int, current_round: int, class_number: int, alpha: int = 0.5) -> NDArrays:
+    """approach_1: blends two signals per neighbour --
+    `weight = (1 - alpha) * dissimilarity + alpha * accuracy_score`, where
+    dissimilarity is each neighbour's `centroid` cosine-distance from the
+    head's own (normalized across neighbours) and accuracy_score is the same
+    weighting as `aggregate_score`. Renormalized to sum to 1."""
 
     alpha_prima = alpha
-    #alpha = 0.5
 
-    ordered_results = []
-    for n in neighbours:
-        for i, (cli, fit_res) in enumerate(results):
-            if n == cli.cid:
-                ordered_results.append(results[i])
+    ordered_results = [(n, results[n]) for n in neighbours if n in results]
 
+    # centroid crosses the wire JSON-encoded (legacy config bridge rejects
+    # list-valued metrics)
     centroids = np.ones((len(neighbours), class_number))
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        if cli.cid == head_id:
-            centroids[i] = fit_res.metrics['centroid'][0] #TRAINING ONE
-        else:
-            centroids[i] = fit_res.metrics['centroid'] #NEIGHBOURS
+    for i, (idx, fit_res) in enumerate(ordered_results):
+        centroids[i] = json.loads(fit_res.metrics['centroid'])
 
     dissimilarity_matrix = squareform(pdist(centroids, metric='cosine'))
     dissimilarity_vector = dissimilarity_matrix[neighbours.index(head_id)]
     dissimilarity_vector = np.clip(dissimilarity_vector, 1e-6, None)
-    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id)) #First row
+    dissimilarity_vector = np.delete(dissimilarity_vector, neighbours.index(head_id))
     dissimilarity_vector_sum = sum(dissimilarity_vector)
 
     if dissimilarity_vector_sum > 0.:
         dissimilarity_vector = dissimilarity_vector/dissimilarity_vector_sum
 
-    #I should now subsitute neigh_metrics
     scaling_norm = 0.
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        if cli.cid == head_id:
+    for i, (idx, fit_res) in enumerate(ordered_results):
+        if idx == head_id:
             scaling_norm += fit_res.metrics['acc_val_distr']
         else:
             if neighbour_metrics[i] is not None:
@@ -203,8 +195,8 @@ def aggregate_score_centroids_1(results: List[Tuple[ClientProxy, FitRes]], neigh
 
 
     scaling_factors = []
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        if cli.cid == head_id:
+    for i, (idx, fit_res) in enumerate(ordered_results):
+        if idx == head_id:
             if scaling_norm > 0.:
                 scaling_factors.append(fit_res.metrics['acc_val_distr'] / scaling_norm)
             else:
@@ -215,106 +207,92 @@ def aggregate_score_centroids_1(results: List[Tuple[ClientProxy, FitRes]], neigh
             else:
                 scaling_factors.append(0.)
 
-    # Let's do in-place aggregation
-    # Get first result, then add up each other
-
     weights = []
     for i in range(len(ordered_results) - 1):
         w = (1 - alpha) * dissimilarity_vector[i] + alpha * scaling_factors[i + 1]
         weights.append(w)
 
     if dissimilarity_vector_sum > 0.:
-        #print(dissimilarity_vector)
         all_weights = [alpha_prima * scaling_factors[0]] + list(weights)
         all_weights = np.array(all_weights)
         all_weights = all_weights / all_weights.sum()
     else:
         all_weights = scaling_factors
 
-    #SELF PARAMS GO PLAIN
     params = [
         all_weights[0] * x for x in parameters_to_ndarrays(ordered_results[0][1].parameters)
     ]
-    
     for i, (_, fit_res) in enumerate(ordered_results[1:]):
         res = (
             (all_weights[i + 1]) * x for x in parameters_to_ndarrays(fit_res.parameters)
         )
         params = [reduce(np.add, layer_updates) for layer_updates in zip(params, res)]
-    
     return params
 
 def aggregate_score_centroids_2(
-    results: List[Tuple[ClientProxy, FitRes]], 
-    neighbours: List[int], 
-    head_id: int, 
-    current_round: int, 
-    class_client_matrix: List[List[int]], 
-    class_number: int, 
-    alpha: float = 0.33, 
-    beta: float = 0.33, 
+    results: Dict[int, FitRes],
+    neighbours: List[int],
+    head_id: int,
+    current_round: int,
+    class_client_matrix: List[List[int]],
+    class_number: int,
+    alpha: float = 0.33,
+    beta: float = 0.33,
     gamma: float = 0.33
 ) -> NDArrays:
-    
+    """approach_2: per-class score `distance**alpha * confidence**beta *
+    size**gamma` per neighbour, normalized per class then summed and
+    renormalized into one weight per neighbour. `distance` is Euclidean
+    distance between head/neighbour mean predicted-probability vectors per
+    class (`prob_matrix`)."""
+
     print(f"\n--- Strategy Aggregation for Head Client {head_id} - Neighbours {neighbours} - (Round {current_round}) ---")
 
-    alpha, beta, gamma=0.2,0.6,0.2
-    
-    # Warm-up
-    if current_round <= 7:
-        eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
-        print("Warm-up Active: Defaulting to sample-size driven aggregation.")
-    else:
-        eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
+    eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
 
-    # Align results
-    ordered_results = []
-    for n in neighbours:
-        for cli, fit_res in results:
-            if n == int(cli.cid):
-                ordered_results.append((cli, fit_res))
-                break
+    # Flower's accept_failures=True means a neighbour can be topologically up
+    # (present in `neighbours`) but still missing from `results` if its
+    # fit() call failed -- everything below indexes off `present_neighbours`
+    # (the ones that actually reported), not the full `neighbours` list.
+    ordered_results = [(n, results[n]) for n in neighbours if n in results]
+    if head_id not in results:
+        raise ValueError(f"Head {head_id}'s own fit() result is missing (Flower reported it as a failure) -- cannot aggregate without it.")
+    present_neighbours = [n for n, _ in ordered_results]
 
-    metrics_map = {int(cli.cid): fit_res.metrics for cli, fit_res in ordered_results}
+    metrics_map = {idx: fit_res.metrics for idx, fit_res in ordered_results}
 
-    # CONFIDENCE
-    v_conf = np.zeros((len(neighbours), class_number))
-    head_confidence_data = metrics_map[head_id].get('confidence_score', [])
+    # local copy -- the SIZE block's <3-sample substitution below must not
+    # write into the caller's persistent class_client_matrix
+    effective_matrix = [list(row) for row in class_client_matrix]
 
-    #print("head_centroid=>",head_confidence_data )
-    #Confidence calculation
-    for j, neighbour in enumerate(neighbours):
+    # true (pre-substitution) per-class coverage, for the DISTANCE gate below
+    has_class = {n: [class_client_matrix[n][c] > 0 for c in range(class_number)] for n in present_neighbours}
+
+    # CONFIDENCE -- crosses the wire JSON-encoded (legacy config bridge
+    # rejects list-valued metrics)
+    v_conf = np.zeros((len(present_neighbours), class_number))
+    head_confidence_data = json.loads(metrics_map[head_id].get('confidence_score', '[]'))
+
+    for j, neighbour in enumerate(present_neighbours):
         if neighbour == head_id:
-            #v_conf[j] = np.array(metrics_map[head_id].get('acc_val_distr', [1.0] * class_number))
-            v_conf[j]=head_confidence_data[0]
+            v_conf[j]=head_confidence_data
         else:
-            v_conf[j] = metrics_map[neighbour].get('confidence_score', 0.5)
-            #try:
-            #    neighbor_idx_in_head = neighbours.index(neighbour)
-            #    v_conf[j] = np.array(head_confidence_data[neighbor_idx_in_head])
-            #    print("confidence_in_try=>",v_conf[j],"index=",neighbor_idx_in_head)
-            #except (ValueError, IndexError):
-            #    v_conf[j] = np.ones(class_number) * metrics_map[neighbour].get('acc_val_distr', 0.5)
-            #    print("confidence_in_except=>",v_conf[j],"index=",neighbour)
-            #    print("what_must_use=>",metrics_map[neighbour].get('centroid', 0.5))
+            raw = metrics_map[neighbour].get('confidence_score')
+            v_conf[j] = json.loads(raw) if raw is not None else 0.5
 
-    
-    # SIZE METRIC (normalize by total across neighbours per class)
+    # SIZE -- normalized by total across neighbours per class
     v_norm_size = []
-    for j, neighbour in enumerate(neighbours):
-        counts = np.array(class_client_matrix[neighbour], dtype=float)
+    for j, neighbour in enumerate(present_neighbours):
+        counts = np.array(effective_matrix[neighbour], dtype=float)
 
-        # Replacement: if neighbour size < 3 AND confidence != 0 → use head's size
+        # neighbour size < 3 and confident -> use head's size instead
         for i in range(class_number):
             if counts[i] < 3 and v_conf[j][i] != 0:
-                old_val = counts[i]
-                new_val = class_client_matrix[head_id][i]
+                new_val = effective_matrix[head_id][i]
                 counts[i] = new_val
-                class_client_matrix[neighbour][i] = new_val  # update matrix itself
-                #print(f"Client {neighbour}: replaced size[{i}] {old_val} -> {new_val} (head value)")
+                effective_matrix[neighbour][i] = new_val
 
-        # Now compute normalized sizes using the updated counts
-        total_per_class = np.sum([np.array(class_client_matrix[n]) for n in neighbours], axis=0)
+        total_per_class = np.sum([np.array(effective_matrix[n]) for n in present_neighbours], axis=0)
         normed = np.zeros_like(counts, dtype=float)
         for i in range(class_number):
             if total_per_class[i] != 0:
@@ -323,15 +301,16 @@ def aggregate_score_centroids_2(
         v_norm_size.append(normed)
 
 
-    # DISTANCE (Euclidean-style with special cases)
-    head_prob_matrix = np.array(metrics_map[head_id]['prob_matrix'])
-    v_distance = np.ones((len(neighbours), class_number))
+    # DISTANCE -- prob_matrix crosses the wire JSON-encoded/flattened,
+    # decode and reshape back to (C, C)
+    head_prob_matrix = np.array(json.loads(metrics_map[head_id]['prob_matrix'])).reshape(class_number, class_number)
+    v_distance = np.ones((len(present_neighbours), class_number))
 
-    for i, neighbour in enumerate(neighbours):
-        neigh_prob_matrix = np.array(metrics_map[neighbour]['prob_matrix'])
+    for i, neighbour in enumerate(present_neighbours):
+        neigh_prob_matrix = np.array(json.loads(metrics_map[neighbour]['prob_matrix'])).reshape(class_number, class_number)
         for j in range(class_number):
-            current_has_class = class_client_matrix[head_id][j] > 0
-            neighbor_has_class = class_client_matrix[neighbour][j] > 0
+            current_has_class = has_class[head_id][j]
+            neighbor_has_class = has_class[neighbour][j]
             if neighbour == head_id:
                 dist = 1.0
             elif not current_has_class and neighbor_has_class:
@@ -339,189 +318,26 @@ def aggregate_score_centroids_2(
             elif not current_has_class or not neighbor_has_class:
                 dist = 0.0
             else:
-                # Euclidean distance between head and neighbour pseudo-centroids for class j
                 dist = float(np.linalg.norm(
                     np.array(head_prob_matrix[j]) - np.array(neigh_prob_matrix[j])
                 ))
             v_distance[i][j] = dist
 
-    ###FIN DEBUG
-    """print("=======Distance-conf--sizes================")
-    for i, neighbour in enumerate(neighbours):
-            print("Dist=>",v_distance[i])
-            print("Conf=>",v_conf[i])
-            print("Size=>",v_norm_size[i])
-    """        
-    ###FIN DEBUG
-
     # SCORE + AGGREGATION
-    raw_score = np.zeros((len(neighbours), class_number))
-    
-    for i, neighbour in enumerate(neighbours):
+    raw_score = np.zeros((len(present_neighbours), class_number))
+
+    for i, neighbour in enumerate(present_neighbours):
         for j in range(class_number):
             raw_score[i][j] = (v_distance[i][j] ** eff_alpha) * \
-                              (v_conf[i][j] ** eff_beta) * \
-                              (v_norm_size[i][j] ** eff_gamma)
+                              (v_conf[i][j] ** eff_beta)# * \
+                              #(v_norm_size[i][j] ** eff_gamma)
 
     raw_score_sum = np.sum(raw_score, axis=0)
     v_score = np.divide(raw_score, raw_score_sum, out=np.zeros_like(raw_score), where=raw_score_sum > 0)
 
     global_score_client = np.sum(v_score, axis=1)
     sum_weights = np.sum(global_score_client)
-    weights = global_score_client / sum_weights if sum_weights > 0 else np.ones(len(neighbours)) / len(neighbours)
-
-    print(f"Aggregation Weights: {np.round(weights, 4)}")
-
-    aggregated_params = [np.zeros_like(layer) for layer in parameters_to_ndarrays(ordered_results[0][1].parameters)]
-    for w, (_, fit_res) in zip(weights, ordered_results):
-        client_layers = parameters_to_ndarrays(fit_res.parameters)
-        for idx, layer in enumerate(client_layers):
-            aggregated_params[idx] += w * layer
-
-    return aggregated_params
-
-def aggregate_score_grad_orthog(
-    results: List[Tuple[ClientProxy, FitRes]], 
-    neighbours: List[int], 
-    head_id: int, 
-    current_round: int, 
-    class_client_matrix: List[List[int]], 
-    class_number: int, 
-    alpha: float = 0.33, 
-    beta: float = 0.33, 
-    gamma: float = 0.33
-) -> NDArrays:
-    
-    print(f"\n--- Strategy Aggregation for Head Client {head_id} - Neighbours {neighbours} - (Round {current_round}) ---")
-
-    alpha, beta, gamma=0.2,0.6,0.2
-    
-    # Warm-up
-    if current_round <= 7:
-        eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
-        print("Warm-up Active: Defaulting to sample-size driven aggregation.")
-    else:
-        eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
-
-    # Align results
-    ordered_results = []
-    for n in neighbours:
-        for cli, fit_res in results:
-            if n == int(cli.cid):
-                ordered_results.append((cli, fit_res))
-                break
-
-    metrics_map = {int(cli.cid): fit_res.metrics for cli, fit_res in ordered_results}
-
-    # CONFIDENCE
-    v_conf = np.zeros((len(neighbours), class_number))
-    head_confidence_data = metrics_map[head_id].get('confidence_score', [])
-
-    #print("head_centroid=>",head_confidence_data )
-    #Confidence calculation
-    for j, neighbour in enumerate(neighbours):
-        if neighbour == head_id:
-            #v_conf[j] = np.array(metrics_map[head_id].get('acc_val_distr', [1.0] * class_number))
-            v_conf[j]=head_confidence_data[0]
-        else:
-            v_conf[j] = metrics_map[neighbour].get('confidence_score', 0.5)
-            #try:
-            #    neighbor_idx_in_head = neighbours.index(neighbour)
-            #    v_conf[j] = np.array(head_confidence_data[neighbor_idx_in_head])
-            #    print("confidence_in_try=>",v_conf[j],"index=",neighbor_idx_in_head)
-            #except (ValueError, IndexError):
-            #    v_conf[j] = np.ones(class_number) * metrics_map[neighbour].get('acc_val_distr', 0.5)
-            #    print("confidence_in_except=>",v_conf[j],"index=",neighbour)
-            #    print("what_must_use=>",metrics_map[neighbour].get('centroid', 0.5))
-
-    
-    # SIZE METRIC (normalize by total across neighbours per class)
-    v_norm_size = []
-    for j, neighbour in enumerate(neighbours):
-        counts = np.array(class_client_matrix[neighbour], dtype=float)
-
-        # Replacement: if neighbour size < 3 AND confidence != 0 → use head's size
-        for i in range(class_number):
-            if counts[i] < 3 and v_conf[j][i] != 0:
-                old_val = counts[i]
-                new_val = class_client_matrix[head_id][i]
-                counts[i] = new_val
-                class_client_matrix[neighbour][i] = new_val  # update matrix itself
-                #print(f"Client {neighbour}: replaced size[{i}] {old_val} -> {new_val} (head value)")
-
-        # Now compute normalized sizes using the updated counts
-        total_per_class = np.sum([np.array(class_client_matrix[n]) for n in neighbours], axis=0)
-        normed = np.zeros_like(counts, dtype=float)
-        for i in range(class_number):
-            if total_per_class[i] != 0:
-                normed[i] = counts[i] / total_per_class[i]
-
-        v_norm_size.append(normed)
-
-    #DISTANCE
-    neigh_parameters = []
-    #head_prob_matrix = []
-
-    for i, (cli, fit_res) in enumerate(ordered_results):
-        if cli.cid == head_id:
-            head_parameters = fit_res.parameters
-        neigh_parameters.append(fit_res.parameters)
-
-    v_distance = np.ones((len(neighbours)))
-
-    def parameters_to_vector(parameters):
-        arrays = parameters_to_ndarrays(parameters)
-        return np.concatenate([arr.ravel() for arr in arrays])
-
-    for i, (neighbour) in enumerate(neighbours):
-        v1 = parameters_to_vector(head_parameters)
-        v2 = parameters_to_vector(neigh_parameters[i])
-        
-        eps = 1e-6
-        if neighbour == head_id:
-            dist = 1.0
-        elif np.linalg.norm(v1) < eps or np.linalg.norm(v2) < eps:
-            dist = 0.
-        else:
-            dist = 1. - cosine(v1, v2)
-
-        if dist < 0.: #Oposite direction, give less importance?
-            dist = np.abs(dist) / 2.
-
-        v_distance[i] = dist
-
-    #print(v_distance)
-
-    """print("=======Distance-conf--sizes================")
-    for i, neighbour in enumerate(neighbours):
-            print("Dist=>",v_distance[i])
-            print("Conf=>",v_conf[i])
-            print("Size=>",v_norm_size[i])
-    """        
-    ###FIN DEBUG
-
-    # SCORE + AGGREGATION
-    raw_score = np.zeros((len(neighbours), class_number))
-    
-    for i, neighbour in enumerate(neighbours):
-        for j in range(class_number):
-            raw_score[i][j] = (v_conf[i][j] ** eff_beta) * \
-                              (v_norm_size[i][j] ** eff_gamma)
-
-    raw_score_sum = np.sum(raw_score, axis=0)
-    v_score = np.divide(raw_score, raw_score_sum, out=np.zeros_like(raw_score), where=raw_score_sum > 0)
-
-    global_score_client = np.sum(v_score, axis=1)
-    sum_v_distance = sum(e**eff_alpha for e in v_distance)
-
-    #GLOBAL SCORE PER NEIGHBOR
-    for i, (neighbour) in enumerate(neighbours):
-        if sum_v_distance > 0:
-            global_score_client[i] *= ((v_distance[i]**eff_alpha)/sum_v_distance)
-        #else:  to 0 / Or mild...          
-
-    sum_weights = np.sum(global_score_client)
-    weights = global_score_client / sum_weights if sum_weights > 0 else np.ones(len(neighbours)) / len(neighbours)
+    weights = global_score_client / sum_weights if sum_weights > 0 else np.ones(len(present_neighbours)) / len(present_neighbours)
 
     print(f"Aggregation Weights: {np.round(weights, 4)}")
 

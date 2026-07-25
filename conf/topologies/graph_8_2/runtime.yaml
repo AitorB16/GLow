@@ -1,60 +1,60 @@
-pools:
-  p0:
+heads:
+  h0:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p1:
+  h1:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
 
-  p2:
+  h2:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p3:
+  h3:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p4:
+  h4:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p5:
+  h5:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p6:
+  h6:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p7:
+  h7:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p8:
+  h8:
     down:
     up:
     malicious:
     status: up #up, down
     nature: OK #OK, malicious, empty
-  p9:
+  h9:
     down:
     up:
     malicious:

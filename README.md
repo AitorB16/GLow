@@ -12,8 +12,8 @@ Moreover, a Centralized (CNL) and a Centralized Federated Learning (CFL) version
 
 
 ## Installation and Dependencies
-Built upon Flower v1.7.0 and setuptools v65.0.0 -- using Python 3.10.
-As the [uv.lock](uv.lock) file is present, just run:
+Built upon Flower 1.30.0 and setuptools v65.0.0 -- using Python 3.10.
+As the [pyproject.toml](pyproject.toml) file is present, just run:
 ```sh 
 uv sync
 ```
@@ -34,18 +34,19 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_1'*, *'approach_2'*
 - **topology:** str; path to yaml file containing system topology
 - **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
-- **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*, *'prepare_dataset_niid_class_partition'*,
+- **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*,
 *'skew_class_niid_train_common_test'*, *'skew_class_niid_train_niid_test'*
 - **device:** str; select among *CPU*, *GPU*, *H100*
-- **early_local_train:** bool; to force the system work in SL for the first *n* communication rounds before neighbor aggregation 
 - **num_rounds:** int; total number of communication rounds
 - **batch_size:** int; hyperparameter for DataLoader
 - **num_classes:** int; output layer size
 - **seed:** int, added for replicability
+- **warmup_rounds:** int; every participant trains for `warmup_epochs` instead of `config_fit.local_epochs` for the first `warmup_rounds` communication rounds.
+- **warmup_epochs:** int; epoch count used during the warm-up window above.
 - **config_fit:** hyperparameters
     - **lr:** float; learning rate
     - **momentum:** float; momentum
-    - **local_epochs:**  int; epochs to be performed by each agent with local instances
+    - **local_epochs:**  int; epochs to be performed by each agent with local instances (after the warm-up window)
 
 ### Topology
 
@@ -54,11 +55,11 @@ Example file located in [conf/topologies/graph_8_2/graph_1.yaml](conf/topologies
 - **max_num_clients_per_round:** int; max number of clients performing aggregation (i.e., number of neighbors)
 - **clients_with_no_data:** int list (optional); containing the IDs of special nodes with no local instances
 - **last_connected_client:** int; ID of last node connected to the network, nodes with higher IDs will perform SL
-- **pools:**
-    - **p0:** int list; containing neighbor IDs
-    - **p1:** int list; containing neighbor IDs
+- **heads:**
+    - **h0:** int list; containing neighbor IDs
+    - **h1:** int list; containing neighbor IDs
     - **...** 
-    - **p<num_clients-1>:** int list; containing neighbor IDs
+    - **h<num_clients-1>:** int list; containing neighbor IDs
 
 > Note: Multiple example topologies are located in [topologies](./conf/topologies/) directory; chain, ring_chain, ring, star_chain, graph_8_2 (8+2 from disconnected to fully connected) and graph_16_2 (16+4 from disconnected to fully connected) cases.
 ## Topology generator
@@ -113,11 +114,11 @@ Example:
 ## Results
 The output of each experiment consists in the following files:
 
-- **partitions.out:** Training and test matrices containing number of instances per class per agent
-- **result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics
-- **heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
-- **raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *macro_f1*, *Exec_time*
-- **parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
+- **\<run_id>_partitions.out:** Training and test matrices containing number of instances per class per agent
+- **\<run_id>_result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics
+- **\<run_id>_heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
+- **\<run_id>_raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *macro_f1*, *Exec_time*
+- **\<run_id>_parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
 
 ### Executions with Hydra
 Hydra creates a nested directory with current date and times at the moment experiments are launched. Additional files and directories are created in this execution variant
@@ -129,11 +130,9 @@ Hydra creates a nested directory with current date and times at the moment exper
 
 ## Visualization
 
-This section is oriented for visualization of the results obtained from *multiple runs*; experiments testing system convergence by the degree of inter-connectivity -- from fully disconnected to fully connected. Moreover, a version for visualizing the results from FedAVG is available as well.
+This section is oriented for visualization of the results obtained from *multiple runs*; experiments testing system convergence by the degree of inter-connectivity -- from fully disconnected to fully connected.
 
-- **8_visualize_results:** Visualize GLow experiments for an 8 agent scenario
-- **16_visualize_results:** Visualize GLow experiments for an 16 agent scenario
-- **FL_visualize_results:** Visualize FL experiments
+- **example_visualization_results:** Example of how to plot (for convergence performance comparison) executions of *inplace*, *score*, *score_validation* and *approach_2* on a given topology.
 - **draw_graphs:** Draws graphs from YAML files generated with [generate_topology.ipynb](./generate_topology.ipynb)
 
 ## Changes in libraries
@@ -143,7 +142,7 @@ Implementation of additional aggregation methods [flwr/server/strategy/aggregate
 
 If having problems with Ray Scalability (regarding dataset, python and ray versions), check [flwr/simulation/app.py](/flwr_lib_modifications/app.py).
 
-> Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py). 
+> Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py).
 
 ## Author
 

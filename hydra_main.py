@@ -1,6 +1,10 @@
+"""Hydra-decorated single-run entrypoint (`python3 hydra_main.py
+topology=... runtime=... aggregation=...`); ad-hoc dev alternative to
+main.py, config from `conf/base.yaml` + CLI overrides."""
+
 import time
-import flwr as fl
 import pickle
+import logging
 from pathlib import Path
 
 from typing import List, Optional, Dict
@@ -15,13 +19,19 @@ from omegaconf import DictConfig, OmegaConf
 import yaml
 
 from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
-from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average, 
+from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average,
 from server import get_on_fit_config, get_evaluate_fn
 
-from flwr.client import ClientFn
+from flwr.common import Context
+from flwr.client import ClientApp
+from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.client_manager import ClientManager, SimpleClientManager
+from flwr.simulation import run_simulation
 
 from custom_strategies.GLow_strategy import GLow_strategy
+
+# silence Flower's per-round INFO logging, keep WARNING/ERROR
+logging.getLogger("flwr").setLevel(logging.WARNING)
 
 @hydra.main(config_path="conf", config_name="base", version_base=None)
 def main(cfg: DictConfig):
@@ -42,24 +52,24 @@ def main(cfg: DictConfig):
 
     topology = []
     for cli_ID in cids:
-        topology.append(tplgy['pools']['p'+str(cli_ID)])
+        topology.append(tplgy['heads']['h'+str(cli_ID)])
 
     with open(cfg.runtime, 'r') as file:
         runtime = yaml.safe_load(file)
     
     #Runtime options
-    pool_switch_down = []
-    pool_switch_up = []
-    pool_status = []
-    pool_nature = []
-    pool_switch_malicious = []
+    head_switch_down = []
+    head_switch_up = []
+    head_status = []
+    head_nature = []
+    head_switch_malicious = []
     for i in range(num_clients):
-        client_runtime = runtime['pools']['p'+str(i)]
-        pool_switch_down.append(client_runtime['down'])
-        pool_switch_up.append(client_runtime['up'])
-        pool_switch_malicious.append(client_runtime['malicious'])
-        pool_status.append(client_runtime['status'])
-        pool_nature.append(client_runtime['nature'])
+        client_runtime = runtime['heads']['h'+str(i)]
+        head_switch_down.append(client_runtime['down'])
+        head_switch_up.append(client_runtime['up'])
+        head_switch_malicious.append(client_runtime['malicious'])
+        head_status.append(client_runtime['status'])
+        head_nature.append(client_runtime['nature'])
 
 
     # 2. PREAPRE YOUR DATASET // NEEDS REFACTORIZATION AND IMPROVEMENT IN EFFICIENCY FOLLOWING SKEWED STYLE
@@ -96,16 +106,17 @@ def main(cfg: DictConfig):
         evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
         total_rounds = cfg.num_rounds,
         run_id = run_id,
-        early_local_train = cfg.early_local_train,
         num_classes=cfg.num_classes,
         class_client_matrix_train = class_client_matrix_train,
-        pool_switch_down=pool_switch_down,
-        pool_switch_up=pool_switch_up,
-        pool_switch_malicious=pool_switch_malicious,
-        pool_status=pool_status,
-        pool_nature=pool_nature,
+        head_switch_down=head_switch_down,
+        head_switch_up=head_switch_up,
+        head_switch_malicious=head_switch_malicious,
+        head_status=head_status,
+        head_nature=head_nature,
         seed = cfg.seed,
-        save_path = save_path
+        save_path = save_path,
+        warmup_rounds = cfg.warmup_rounds,
+        warmup_epochs = cfg.warmup_epochs,
     )
 
     ''' In case new strategies and configurations are deployed on run (NOT IN USE CURRENTLY)'''
@@ -121,8 +132,17 @@ def main(cfg: DictConfig):
     for cli_ID in cids:
         server_pool.append(fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy))'''
 
-    server_config = fl.server.ServerConfig(num_rounds=cfg.num_rounds)
-    server = fl.server.Server(client_manager = SimpleClientManager(), strategy = strategy)
+    server_config = ServerConfig(num_rounds=cfg.num_rounds)
+
+    def server_fn(context: Context) -> ServerAppComponents:
+        return ServerAppComponents(
+            strategy=strategy,
+            config=server_config,
+            client_manager=SimpleClientManager(),
+        )
+
+    server_app = ServerApp(server_fn=server_fn)
+    client_app = ClientApp(client_fn=client_fn)
 
     # Divide GPU resources among agents (very high level)
     if device == 'GPU':
@@ -131,22 +151,16 @@ def main(cfg: DictConfig):
         num_gpus = 0.
 
    # 5. RUN SIMULATIONS
-    history = fl.simulation.start_simulation(
-        client_fn=client_fn,
-        num_clients=num_clients,
-        clients_ids = cids,
-        server = server,
-        config=server_config,
-        strategy=strategy,
-        client_resources={'num_cpus': 2, 'num_gpus': num_gpus}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+    run_simulation(
+        server_app=server_app,
+        client_app=client_app,
+        num_supernodes=num_clients,
+        backend_config={'client_resources': {'num_cpus': 2, 'num_gpus': num_gpus}}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
     )
+    # run_simulation() doesn't return a History -- strategy accumulates its own
+    history = strategy.history
 
     # 6. SAVE RESULTS
-    #params_path = save_path + run_id + "_results.pkl"
-    #results = {"history": history, "anythingelse": "here"} 
-    #with open(str(params_path), "wb") as h:
-    #    pickle.dump(results, h, protocol=pickle.HIGHEST_PROTOCOL)
-
     print('#################')
     #print(str(history.losses_distributed))
     print('#################')
@@ -156,18 +170,19 @@ def main(cfg: DictConfig):
     print('#################')
     print(str(history.metrics_distributed))
     print('#################')
-    print(str(history.metrics_centralized))
+    # preds_per_class excluded from this console dump -- full version goes to _result_matrix.out
+    print(str({k: v for k, v in history.metrics_centralized.items() if k != 'preds_per_class'}))
 
     out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
     out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
     out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n**macro_f1: ' + ' '.join([str(elem) for elem in history.metrics_centralized['macro_f1']])
     out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
-    f = open(save_path + "raw.out", "w")
+    f = open(save_path + run_id + "_raw.out", "w")
     f.write(out)
     f.close()
 
     # PARTITIONS
-    with open(save_path + "partitions.out", "w") as f:
+    with open(save_path + run_id + "_partitions.out", "w") as f:
         for row in class_client_matrix_train:
             f.write(" ".join(map(str, row)) + "\n")
         f.write("\n")

@@ -1,12 +1,22 @@
+"""Model architecture and plain-PyTorch train/eval routines used by
+client.py. Nothing here is FL-specific -- the gossip logic (head/neighbour
+roles, aggregation) lives in custom_strategies/GLow_strategy.py and
+client.py.
+
+Caveat shared by train()/test()/compute_prob_matrix(): when `nature ==
+'malicious'`, the label permutation is applied to validation/test labels too,
+so a malicious client's self-reported metrics look as "good" as a benign
+client's -- the flip corrupts what ground truth means for that client rather
+than degrading its measured performance.
+"""
+
 import torch
 import torchmetrics
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-# Note the model and functions here defined do not have any FL-specific components.
-
-class Net(nn.Module):
+class Net(nn.Module):  # unused (no caller); kept as an alternate architecture
     def __init__(self, num_classes: int) -> None:
         super(Net, self).__init__()
 
@@ -26,6 +36,8 @@ class Net(nn.Module):
         return self.fc3(x)
     
 class LeNet(nn.Module):
+    """3-conv-layer CNN sized for CIFAR10's 32x32x3 inputs, parameterized
+    only by `num_classes`."""
     def __init__(self, num_classes: int) -> None:
       super().__init__()
       self.conv1 = nn.Conv2d(3, 16, 3, 1, padding=1) # input is color image, hence 3 i/p channels. 16 filters, kernal size is tuned to 3 to avoid overfitting, stride is 1 , padding is 1 extract all edge features.
@@ -50,8 +62,15 @@ class LeNet(nn.Module):
 
 
 def train(net, trainloader, validationloader, optimizer, epochs, num_classes, nature, device):
-    """Train the network on the training set.
-    This is a fairly simple training loop for PyTorch.
+    """`epochs` passes over `trainloader`, then one validation pass computing
+    the **centroid**: per-class fraction of validation samples the
+    freshly-trained model predicts correctly (0 if no validation samples for
+    that class) -- the per-class trust signal GLow_strategy's aggregation
+    strategies compare across clients.
+
+    Returns `(train_loss, val_accuracy, centroid)`; `val_accuracy` falls back
+    to `1/num_classes` if `validationloader` is empty (see
+    `clients_with_no_data` in dataset.py).
     """
     # TRAIN
     criterion = nn.CrossEntropyLoss()
@@ -115,16 +134,16 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
     
     metrics_val_distributed_fit = val_accuracy
 
-    #DELETE?
-    for c in range(num_classes):
-            if centroid[c] == 1.:
-                centroid[c] = 0.
-
     return train_loss, metrics_val_distributed_fit, centroid
 
 def test(net, testloader, num_classes, nature, device):
-    """Validate the network on the entire test set.
-    and report loss and accuracy.
+    """Evaluation-only pass over `testloader`: same per-class centroid as
+    train()'s validation step, plus macro-F1. Used both for GLow_strategy's
+    distributed evaluation and, from client.py's fit(), to recompute a
+    neighbour's/head's centroid after local training.
+
+    Falls back to `accuracy=1/num_classes`, `macro_f1=0.` if `testloader` is
+    empty.
     """
     f1 = torchmetrics.classification.MulticlassF1Score(num_classes=num_classes, average='macro')
 
@@ -159,23 +178,24 @@ def test(net, testloader, num_classes, nature, device):
             accuracy = correct / total_size
             mask = instances_per_class > 0
             centroid[mask] /= instances_per_class[mask]
+            macro_f1 = f1(preds, labels).item()
         else:
             accuracy = 1./num_classes
-
-        macro_f1 = f1(preds, labels).item()
+            macro_f1 = 0.
         #print(f"F1 scores: {macro_f1}\n")
 
     return loss, accuracy, centroid, macro_f1
 
 def compute_prob_matrix(net, testloader, num_classes, nature, device):
-    """Validate the network and return:
-       - matrix (num_classes x num_classes):
-         mean predicted probability vector per true class
-    """
+    """Evaluation-only pass returning two `(num_classes, num_classes)`
+    matrices, row-indexed by true class: `prob_matrix` (mean softmax
+    probability vector per true class -- the per-class distance signal
+    `aggregate_score_centroids_2` uses) and `preds_matrix` (a confusion
+    matrix, currently unused by callers)."""
 
-    instances_per_class = torch.zeros(num_classes, device=device)
-    prob_matrix = torch.zeros((num_classes, num_classes), device=device)
-    preds_matrix = torch.zeros((num_classes, num_classes), device=device, dtype=int) #Is it optimized for device?
+    instances_per_class = torch.zeros(num_classes)
+    prob_matrix = torch.zeros((num_classes, num_classes))
+    preds_matrix = torch.zeros((num_classes, num_classes), dtype=int)
 
     net.eval()
     net.to(device)
@@ -183,15 +203,12 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
     with torch.no_grad():
         for inputs, labels in testloader:
             if nature == 'malicious':  # FLIP LABEL
-                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0], device=labels.device)
+                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])
                 labels = mapping[labels]
 
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            outputs = net(inputs)
-            probs = F.softmax(outputs, dim=1)
-
-            preds = outputs.argmax(dim=1)
+            outputs = net(inputs.to(device))
+            probs = F.softmax(outputs, dim=1).cpu()
+            preds = outputs.argmax(dim=1).cpu()
 
             preds_matrix += torch.bincount(
                 labels * num_classes + preds,
@@ -203,7 +220,7 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
 
             # accumulate probability vectors per class
             prob_matrix.index_add_(0, labels, probs)
-            
+
         # normalize to get means
         mask = instances_per_class > 0
         prob_matrix[mask] /= instances_per_class[mask].unsqueeze(1)

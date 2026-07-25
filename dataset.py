@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 import sys
-from torch.utils.data import Dataset, random_split, DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 import os
 from itertools import chain
@@ -12,10 +12,10 @@ import torchvision.datasets as torch_datasets
 
 
 def get_cifar10(data_path: str = ".datasets"):
-    """Downlaod CIFAR and apply a simple transform."""
+    """Download CIFAR10 and build three dataset views."""
     #ssl._create_default_https_context = ssl._create_unverified_context
     torch_datasets.CIFAR10.url="http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
-   
+
     transform_train = transforms.Compose(
         [transforms.Resize((32,32)),  #resises the image so it can be perfect for our model.
         transforms.RandomHorizontalFlip(), # FLips the image w.r.t horizontal axis
@@ -25,7 +25,7 @@ def get_cifar10(data_path: str = ".datasets"):
         transforms.ToTensor(), # comvert the image to tensor so that it can work with torch
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) #Normalize all the images
         ])
-    
+
     transform_test = transforms.Compose(
         [transforms.Resize((32,32)),
         transforms.ToTensor(),
@@ -33,209 +33,200 @@ def get_cifar10(data_path: str = ".datasets"):
         ])
 
     trainset = torch_datasets.CIFAR10(data_path, train=True, download=True, transform=transform_train)
+    trainset_eval = torch_datasets.CIFAR10(data_path, train=True, download=False, transform=transform_test)
     testset = torch_datasets.CIFAR10(data_path, train=False, download=True, transform=transform_test)
 
-    return trainset, testset
+    return trainset, trainset_eval, testset
+
+
+def _clients_with_data(num_clients: int, clients_with_no_data: list[int]) -> list[int]:
+    """IDs of clients that receive a data partition (all of them if none are excluded)."""
+    if not clients_with_no_data:
+        return list(range(num_clients))
+    return [i for i in range(num_clients) if i not in clients_with_no_data]
+
+
+def _partition_indices(index_pool, lengths, seed):
+    """Deterministically shuffle `index_pool` (a 1-D np.array) and slice it
+    into `len(lengths)` chunks of the given sizes."""
+    index_pool = np.asarray(index_pool)
+    perm = np.random.default_rng(seed).permutation(len(index_pool))
+    shuffled = index_pool[perm]
+    parts = []
+    start = 0
+    for length in lengths:
+        parts.append(shuffled[start:start + length])
+        start += length
+    return parts
+
+
+def _client_train_val_loaders(indices, trainset, trainset_eval, val_ratio, batch_size, seed):
+    """Split `indices` (positions into `trainset`/`trainset_eval`, which
+    must be the same underlying data under different transforms) into a
+    train/val subset for one client."""
+    indices = np.asarray(indices)
+    if len(indices) == 0:
+        return '', ''
+    perm = np.random.default_rng(seed).permutation(len(indices))
+    num_val = int(val_ratio * len(indices))
+    val_idx = indices[perm[:num_val]]
+    train_idx = indices[perm[num_val:]]
+    trainloader = DataLoader(
+        torch.utils.data.Subset(trainset, train_idx),
+        batch_size=batch_size, shuffle=True, num_workers=2,
+        generator=torch.Generator().manual_seed(seed),
+    )
+    valloader = DataLoader(
+        torch.utils.data.Subset(trainset_eval, val_idx),
+        batch_size=batch_size, shuffle=False, num_workers=2,
+    )
+    return trainloader, valloader
+
+
+def _client_test_loader(indices, testset, batch_size, seed):
+    """DataLoader over `testset[indices]`, or `''` if `indices` is empty."""
+    indices = np.asarray(indices)
+    if len(indices) == 0:
+        return ''
+    return DataLoader(
+        torch.utils.data.Subset(testset, indices),
+        batch_size=batch_size, shuffle=True, num_workers=2,
+        generator=torch.Generator().manual_seed(seed),
+    )
 
 
 def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    """IID training data (equal-sized random splits) plus one shared test set
+    identical for every client."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    # SEVERAL TRAIN SETS / COMMON TEST SET
-    """Load CIFAR10 (training and test set)."""
-    trainset, testset = get_cifar10()
+    trainset, trainset_eval, testset = get_cifar10()
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     # SPLIT DATASET BY CLASSES
-    ordered_trainset = []
+    labels_train = np.array(trainset.targets)
+    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(trainset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_trainset.extend(tmp_part)
+    num_images = len(ordered_train_idx) // len(clients_with_data)
+    num_images_remainder = len(ordered_train_idx) % len(clients_with_data)
 
-    num_images = len(ordered_trainset) // len(clients_with_data)
-    num_images_remainder = len(ordered_trainset) % len(clients_with_data)
-    
     partition_len_train = [0] * num_clients
-    
+
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
         partition_len_train[i] = num_images
         if num_images_remainder > 0:
             partition_len_train[i] += 1
             num_images_remainder -=1
-   
+
     ##########
-    trainsets = random_split(
-        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
-    )
+    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
 
     trainloaders = []
     validationloaders = []
-    
-    for client_id, trainset_ in enumerate(trainsets):
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
-        )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
-        
-
-        for _, label in trainset_:
-            for c in range(num_classes):
-                class_client_matrix_train[client_id, c] += np.sum(label == c)
-
-    #TEST SET
-    ordered_testset = []
-
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(testset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_testset.extend(tmp_part)
-
-    
-    testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    testloaders = [testloader] * num_clients
 
     for client_id in range(num_clients):
-        for _, label in ordered_testset:
-            for c in range(num_classes):
-                class_client_matrix_test[client_id, c] += np.sum(label == c)
+        trainloader, valloader = _client_train_val_loaders(
+            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
+        )
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        class_client_matrix_train[client_id] = np.bincount(
+            labels_train[client_train_indices[client_id]], minlength=num_classes
+        )
+
+    #TEST SET
+    labels_test = np.array(testset.targets)
+    ordered_test_idx = np.concatenate([np.where(labels_test == i)[0] for i in range(num_classes)])
+
+    testloader = _client_test_loader(ordered_test_idx, testset, batch_size, seed)
+    testloaders = [testloader] * num_clients
+
+    test_counts = np.bincount(labels_test, minlength=num_classes)
+    for client_id in range(num_clients):
+        class_client_matrix_test[client_id] = test_counts
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+    """"Coarse" Dirichlet-skewed training data: one Dirichlet draw (fixed
+    8-length `alpha`, i.e. sized for an 8-client topology) sizes a contiguous
+    slice of the class-sorted train set per client. Test set is shared for
+    every client."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
-    
-    # SEVERAL TRAIN SETS / COMMON TEST SET
-    """Load CIFAR10 (training and test-set). DIRICHLET"""
-    trainset, testset = get_cifar10()
+
+    trainset, trainset_eval, testset = get_cifar10()
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     # SPLIT DATASET BY CLASSES
-    ordered_trainset = []
-
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(trainset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_trainset.extend(tmp_part)
+    labels_train = np.array(trainset.targets)
+    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
     # SPLIT DIRICHLET DISTRIBUTION
     alpha = [20., 1., 1., 2., 2., 1., 1., 20. ]
     dirich = np.random.dirichlet(alpha)
-    
+
     partition_len_train = [0] * num_clients
     total_instances = 0
     j = 0
-    
+
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_train[i] = int(len(ordered_trainset)*dirich[j])
+        partition_len_train[i] = int(len(ordered_train_idx)*dirich[j])
         total_instances += partition_len_train[i]
         j+=1
 
-    remainder = len(ordered_trainset) - total_instances
+    remainder = len(ordered_train_idx) - total_instances
     partition_len_train[clients_with_data[0]] += remainder
-   
+
     ##########
-    trainsets = random_split(
-        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
-    )
+    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+
     trainloaders = []
     validationloaders = []
-    
-    for client_id, trainset_ in enumerate(trainsets):
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
-        )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
-        
-        for _, label in trainset_:
-            for c in range(num_classes):
-                class_client_matrix_train[client_id, c] += np.sum(label == c)
-
-    #TEST SET
-    ordered_testset = []
-
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(testset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_testset.extend(tmp_part)
-
-    testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
-    testloaders = [testloader] * num_clients
 
     for client_id in range(num_clients):
-        for _, label in ordered_testset:
-            for c in range(num_classes):
-                class_client_matrix_test[client_id, c] += np.sum(label == c)
+        trainloader, valloader = _client_train_val_loaders(
+            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
+        )
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        class_client_matrix_train[client_id] = np.bincount(
+            labels_train[client_train_indices[client_id]], minlength=num_classes
+        )
+
+    #TEST SET
+    labels_test = np.array(testset.targets)
+    ordered_test_idx = np.concatenate([np.where(labels_test == i)[0] for i in range(num_classes)])
+
+    testloader = _client_test_loader(ordered_test_idx, testset, batch_size, seed)
+    testloaders = [testloader] * num_clients
+
+    test_counts = np.bincount(labels_test, minlength=num_classes)
+    for client_id in range(num_clients):
+        class_client_matrix_test[client_id] = test_counts
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 def skew_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
-    #It will need refinement to work with clients with NO data - 0 instances...
+    """"Fine" per-class Dirichlet skew (`alpha<0.1`, strongly skewed): each
+    class is independently Dirichlet-split across `clients_with_data`, giving
+    direct per-client per-class control -- the standard FL class-skew
+    partitioning. Test set is shared for every client."""
 
     alpha = 0.1
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
-    
-    # SEVERAL TRAIN SETS / COMMON TEST SET
-    """Load CIFAR10 (training and test-set). DIRICHLET"""
-    trainset, testset = get_cifar10()
+
+    trainset, trainset_eval, testset = get_cifar10()
     labels_train = np.array(trainset.targets)
     labels_test = np.array(testset.targets)
     client_indices = [[] for _ in range(num_clients)]
@@ -243,12 +234,7 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     for c in range(num_classes):
 
@@ -263,45 +249,18 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
         for i, client_id in enumerate(clients_with_data):
             client_indices[client_id].extend(class_split[i])
 
-    trainsets = [
-        #torch.utils.data.Subset(trainset, client_indices[i])
-        torch.utils.data.Subset(trainset, client_indices[i])
-        for i in range(num_clients)
-    ]
-
     trainloaders = []
     validationloaders = []
 
-    for trainset_ in trainsets:
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
+    for client_id in range(num_clients):
+        trainloader, valloader = _client_train_val_loaders(
+            client_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
         )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
 
     #TEST SET
-    ordered_testset = []
-
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(testset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_testset.extend(tmp_part)
-
-    testloader = DataLoader(ordered_testset, batch_size=batch_size, shuffle=True, num_workers=2)
+    testloader = _client_test_loader(np.arange(len(testset)), testset, batch_size, seed)
     testloaders = [testloader] * num_clients
 
     for client_id in range(num_clients):
@@ -316,14 +275,17 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
 
 #CREATE SKEW WITH INDEPENDENT TESTSETS!!
 def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
-    #It will need refinement to work with clients with NO data - 0 instances...
-    alpha = 0.1 #INPUT AS PARAM
+    """Same per-class Dirichlet skew as `skew_class_niid_train_common_test`,
+    but the same per-class proportions (`dirichlet_props`, drawn once from
+    the train split) are reapplied to independently partition the test set --
+    each client's test set mirrors its own train set's class distribution
+    without sharing samples with anyone else."""
+
+    alpha = 0.1
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    # SEVERAL TRAIN SETS / COMMON TEST SET
-    """Load CIFAR10 (training and test-set). DIRICHLET"""
-    trainset, testset = get_cifar10()
+    trainset, trainset_eval, testset = get_cifar10()
     labels_train = np.array(trainset.targets)
     labels_test = np.array(testset.targets)
     client_indices = [[] for _ in range(num_clients)]
@@ -331,12 +293,7 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     dirichlet_props = np.zeros((num_classes, len(clients_with_data)))
     for c in range(num_classes):
@@ -353,63 +310,34 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
         for i, client_id in enumerate(clients_with_data):
             client_indices[client_id].extend(class_split[i])
 
-    trainsets = [
-        torch.utils.data.Subset(trainset, client_indices[i])
-        for i in range(num_clients)
-    ]
-
     trainloaders = []
     validationloaders = []
 
-    for trainset_ in trainsets:
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
+    for client_id in range(num_clients):
+        trainloader, valloader = _client_train_val_loaders(
+            client_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
         )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
-    
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+
     # TEST SET
     test_client_indices = [[] for _ in range(num_clients)]
 
     for c in range(num_classes):
         idx = np.where(labels_test == c)[0]
         np.random.shuffle(idx)
-        
+
         proportions = dirichlet_props[c]
-        
+
         split_points = (np.cumsum(proportions) * len(idx)).astype(int)[:-1]
         class_split = np.split(idx, split_points)
-        
+
         for i, client_id in enumerate(clients_with_data):
             test_client_indices[client_id].extend(class_split[i])
-    
-    testsets = [
-        torch.utils.data.Subset(testset, test_client_indices[i])
-        for i in range(num_clients)
-    ]
 
     testloaders = []
-    size_testsets = []
-    for testset_ in testsets:
-        num_total = len(testset_)
-        size_testsets.append(num_total)
-        if num_total > 0:
-            testloaders.append(
-                DataLoader(testset_, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-        else:
-            testloaders.append('')
+    for client_id in range(num_clients):
+        testloaders.append(_client_test_loader(test_client_indices[client_id], testset, batch_size, seed))
 
     for client_id in range(num_clients):
         client_labels_train = labels_train[client_indices[client_id]]
@@ -422,89 +350,57 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
 
 
 def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    """IID training data plus an independently IID-partitioned test set,
+    split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    """Load CIFAR10 (training and test set)."""
-    trainset, testset = get_cifar10()
+    trainset, trainset_eval, testset = get_cifar10()
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     # SPLIT DATASET BY CLASSES
-    ordered_trainset = []
+    labels_train = np.array(trainset.targets)
+    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(trainset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_trainset.extend(tmp_part)
+    num_images = len(ordered_train_idx) // len(clients_with_data)
+    num_images_remainder = len(ordered_train_idx) % len(clients_with_data)
 
-
-    num_images = len(ordered_trainset) // len(clients_with_data)
-    num_images_remainder = len(ordered_trainset) % len(clients_with_data)
-    
     partition_len_train = [0] * num_clients
-    
+
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
         partition_len_train[i] = num_images
         if num_images_remainder > 0:
             partition_len_train[i] += 1
             num_images_remainder -=1
-   
+
     ##########
-    trainsets = random_split(
-        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
-    )
+    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+
     trainloaders = []
     validationloaders = []
-    
-    for client_id, trainset_ in enumerate(trainsets):
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
-        )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
 
-        for _, label in trainset_:
-            for c in range(num_classes):
-                class_client_matrix_train[client_id, c] += np.sum(label == c)
+    for client_id in range(num_clients):
+        trainloader, valloader = _client_train_val_loaders(
+            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
+        )
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        class_client_matrix_train[client_id] = np.bincount(
+            labels_train[client_train_indices[client_id]], minlength=num_classes
+        )
 
     #TEST SET
-    ordered_testset = []
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(testset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_testset.extend(tmp_part)
-    
+    labels_test = np.array(testset.targets)
+
     partition_len_test = [0] * num_clients
 
-    #SPLIT DS ACCORDINGLY   
-    len_instances_test = len(ordered_testset) // num_clients
-    remainder = len(ordered_testset) % num_clients
+    #SPLIT DS ACCORDINGLY
+    len_instances_test = len(testset) // num_clients
+    remainder = len(testset) % num_clients
 
     for i in range(num_clients):
         partition_len_test[i] = len_instances_test
@@ -512,53 +408,33 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
     partition_len_test[0] += remainder
 
     ##########
-    testsets = random_split(
-        ordered_testset, partition_len_test, torch.Generator().manual_seed(seed)
-    )
+    client_test_indices = _partition_indices(np.arange(len(testset)), partition_len_test, seed)
     testloaders = []
-    
-    for client_id, testset_ in enumerate(testsets):
-        num_total = len(testset_)
-        if num_total > 0:
-            testloaders.append(
-                DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-        else:
-            testloaders.append('')
-        
-        for _, label in testset_:
-            for c in range(num_classes):
-                class_client_matrix_test[client_id, c] += np.sum(label == c)
+
+    for client_id in range(num_clients):
+        testloaders.append(_client_test_loader(client_test_indices[client_id], testset, batch_size, seed))
+        class_client_matrix_test[client_id] = np.bincount(
+            labels_test[client_test_indices[client_id]], minlength=num_classes
+        )
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
 def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+    """"Coarse" Dirichlet-skewed training data plus an independently IID-partitioned
+    test set split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    """Load CIFAR10 (training and test set). DIRICHLET"""
-    trainset, testset = get_cifar10()
+    trainset, trainset_eval, testset = get_cifar10()
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     # SPLIT DATASET BY CLASSES
-    ordered_trainset = []
-
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(trainset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_trainset.extend(tmp_part)
+    labels_train = np.array(trainset.targets)
+    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
     # SPLIT DIRICHLET DISTRIBUTION
     #alpha = [10., 1., 1., 2., 2., 1., 1., 10. ]
@@ -569,64 +445,44 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     #alpha = [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1. ]
     #dirich = np.random.dirichlet([alpha]*len(clients_with_data))
     dirich = np.random.dirichlet(alpha)
-    
+
     partition_len_train = [0] * num_clients
     total_instances = 0
     j = 0
-    
+
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_train[i] = int(len(ordered_trainset)*dirich[j])
+        partition_len_train[i] = int(len(ordered_train_idx)*dirich[j])
         total_instances += partition_len_train[i]
         j+=1
 
-    remainder = len(ordered_trainset) - total_instances
+    remainder = len(ordered_train_idx) - total_instances
     partition_len_train[clients_with_data[0]] += remainder
 
     ##########
-    trainsets = random_split(
-        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
-    )
+    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+
     trainloaders = []
     validationloaders = []
-    
-    for client_id, trainset_ in enumerate(trainsets):
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
+
+    for client_id in range(num_clients):
+        trainloader, valloader = _client_train_val_loaders(
+            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
         )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
-        
-        for _, label in trainset_:
-            for c in range(num_classes):
-                class_client_matrix_train[client_id, c] += np.sum(label == c)
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        class_client_matrix_train[client_id] = np.bincount(
+            labels_train[client_train_indices[client_id]], minlength=num_classes
+        )
 
     #TEST SET
-    ordered_testset = []
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(testset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_testset.extend(tmp_part)
-    
+    labels_test = np.array(testset.targets)
+
     partition_len_test = [0] * num_clients
 
-    #SPLIT DS ACCORDINGLY   
-    len_instances_test = len(ordered_testset) // num_clients
-    remainder = len(ordered_testset) % num_clients
+    #SPLIT DS ACCORDINGLY
+    len_instances_test = len(testset) // num_clients
+    remainder = len(testset) % num_clients
 
     for i in range(num_clients):
         partition_len_test[i] = len_instances_test
@@ -634,139 +490,93 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     partition_len_test[0] += remainder
 
     ##########
-    testsets = random_split(
-        ordered_testset, partition_len_test, torch.Generator().manual_seed(seed)
-    )
+    client_test_indices = _partition_indices(np.arange(len(testset)), partition_len_test, seed)
     testloaders = []
-    
-    for client_id, testset_ in enumerate(testsets):
-        num_total = len(testset_)
-        if num_total > 0:
-            testloaders.append(
-                DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-        else:
-            testloaders.append('')
-        for _, label in testset_:
-            for c in range(num_classes):
-                class_client_matrix_test[client_id, c] += np.sum(label == c)
+
+    for client_id in range(num_clients):
+        testloaders.append(_client_test_loader(client_test_indices[client_id], testset, batch_size, seed))
+        class_client_matrix_test[client_id] = np.bincount(
+            labels_test[client_test_indices[client_id]], minlength=num_classes
+        )
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
 def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+    """"Coarse" Dirichlet-skewed training data plus
+    a test set skewed the same way: the identical `dirich` proportions drawn
+    for the train split slice the independent, class-sorted test set into
+    per-client chunks."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    """Load CIFAR10 (training and test set). DIRICHLET"""
-    trainset, testset = get_cifar10()
+    trainset, trainset_eval, testset = get_cifar10()
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
-    clients_with_data = []
-    for i in range(num_clients):
-        if not clients_with_no_data:
-            clients_with_data.append(i)
-        elif i not in clients_with_no_data:
-            clients_with_data.append(i)
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
     # SPLIT DATASET BY CLASSES
-    ordered_trainset = []
-
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(trainset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_trainset.extend(tmp_part)
+    labels_train = np.array(trainset.targets)
+    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
     # SPLIT DIRICHLET DISTRIBUTION
     alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
     dirich = np.random.dirichlet(alpha)
-    
+
     partition_len_train = [0] * num_clients
     total_instances = 0
     j = 0
-    
+
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_train[i] = int(len(ordered_trainset)*dirich[j])
+        partition_len_train[i] = int(len(ordered_train_idx)*dirich[j])
         total_instances += partition_len_train[i]
         j+=1
 
-    remainder = len(ordered_trainset) - total_instances
+    remainder = len(ordered_train_idx) - total_instances
     partition_len_train[clients_with_data[0]] += remainder
 
     ##########
-    trainsets = random_split(
-        ordered_trainset, partition_len_train, torch.Generator().manual_seed(seed)
-    )
+    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+
     trainloaders = []
     validationloaders = []
-    
-    for client_id, trainset_ in enumerate(trainsets):
-        num_total = len(trainset_)
-        num_val = int(val_ratio * num_total)
-        num_train = num_total - num_val
-        for_train, for_val = random_split(
-            trainset_, [num_train, num_val], torch.Generator().manual_seed(seed)
+
+    for client_id in range(num_clients):
+        trainloader, valloader = _client_train_val_loaders(
+            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
         )
-        if num_total > 0:
-            trainloaders.append(
-                DataLoader(for_train, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-            validationloaders.append(
-                DataLoader(for_val, batch_size=batch_size, shuffle=False, num_workers=2)
-            )
-        else:
-            trainloaders.append('')
-            validationloaders.append('')
-        
-        for _, label in trainset_:
-            for c in range(num_classes):
-                class_client_matrix_train[client_id, c] += np.sum(label == c)
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        class_client_matrix_train[client_id] = np.bincount(
+            labels_train[client_train_indices[client_id]], minlength=num_classes
+        )
 
     #TEST SET
-    ordered_testset = []
-    for i in range(num_classes):
-        tmp_part = []
-        for j, data in enumerate(testset):
-            img, label = data
-            if label == i:
-                tmp_part.append(data)
-        ordered_testset.extend(tmp_part)
-    
+    labels_test = np.array(testset.targets)
+    ordered_test_idx = np.concatenate([np.where(labels_test == i)[0] for i in range(num_classes)])
+
     partition_len_test = [0] * num_clients
     total_instances = 0
     j = 0
 
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_test[i] = int(len(ordered_testset)*dirich[j])
+        partition_len_test[i] = int(len(ordered_test_idx)*dirich[j])
         total_instances += partition_len_test[i]
         j+=1
-    remainder = len(ordered_testset) - total_instances
+    remainder = len(ordered_test_idx) - total_instances
     partition_len_test[clients_with_data[0]] += remainder
 
     ##########
-    testsets = random_split(
-        ordered_testset, partition_len_test, torch.Generator().manual_seed(seed)
-    )
+    client_test_indices = _partition_indices(ordered_test_idx, partition_len_test, seed)
     testloaders = []
-    
-    for client_id, testset_ in enumerate(testsets):
-        num_total = len(testset_)
-        if num_total > 0:
-            testloaders.append(
-                DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=2)
-            )
-        else:
-            testloaders.append('')
-        
-        for _, label in testset_:
-            for c in range(num_classes):
-                class_client_matrix_test[client_id, c] += np.sum(label == c)
 
+    for client_id in range(num_clients):
+        testloaders.append(_client_test_loader(client_test_indices[client_id], testset, batch_size, seed))
+        class_client_matrix_test[client_id] = np.bincount(
+            labels_test[client_test_indices[client_id]], minlength=num_classes
+        )
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
