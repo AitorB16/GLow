@@ -62,14 +62,7 @@ Example file located in [conf/topologies/graph_8_2/graph_1.yaml](conf/topologies
     - **h<num_clients-1>:** int list; containing neighbor IDs
 
 > Note: Multiple example topologies are located in [topologies](./conf/topologies/) directory; chain, ring_chain, ring, star_chain, graph_8_2 (8+2 from disconnected to fully connected) and graph_16_2 (16+4 from disconnected to fully connected) cases.
-## Topology generator
-[generate_topology.ipynb](./generate_topology.ipynb) Allows to easily create YAML files for different topologies. All methods need a positive int specifying the number of inter-connected nodes.
-- **generate_chain():**
-- **generate_star_chain():**
-- **...**
-- **generate_from_islands_to_fully_connected():** this method creates itertively all the possible topologies from a disconnected graph to a fully connected one (connecting each node to 2 new neighbors in each iteration)
 
-> Note: All methods admit an optional parameter (int) specifying the number of islands (disconnected nodes).
 ## Execution instructions
 
 The following execution variants are allowed with their corresponding HPC deployment scripts -- depending on the execution target: (1) Single run unique topology. (2) Multiple simulations multiple topologies.
@@ -101,6 +94,15 @@ Example:
 
 A directory named *run_name* is created in [outputs](./outputs/) to store execution results.
 > Note: Deployment script [mult_exp.sh](/mult_exp.sh) has to be configured for Python or Slurm usage.
+
+## Topology generator
+[generate_topology.ipynb](./generate_topology.ipynb) Allows to easily create YAML files for different topologies. All methods need a positive int specifying the number of inter-connected nodes.
+- **generate_chain():**
+- **generate_star_chain():**
+- **...**
+- **generate_from_islands_to_fully_connected():** this method creates itertively all the possible topologies from a disconnected graph to a fully connected one (connecting each node to 2 new neighbors in each iteration)
+
+> Note: All methods admit an optional parameter (int) specifying the number of islands (disconnected nodes).
 
 ## Results
 The output of each experiment consists in the following files:
