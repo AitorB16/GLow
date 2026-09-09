@@ -8,12 +8,10 @@ import os
 from itertools import chain
 import torchvision.transforms
 import torchvision.datasets as torch_datasets
-#import ssl
 
 
 def get_cifar10(data_path: str = ".datasets"):
     """Download CIFAR10 and build three dataset views."""
-    #ssl._create_default_https_context = ssl._create_unverified_context
     torch_datasets.CIFAR10.url="http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
 
     transform_train = transforms.Compose(
@@ -71,14 +69,17 @@ def _client_train_val_loaders(indices, trainset, trainset_eval, val_ratio, batch
     num_val = int(val_ratio * len(indices))
     val_idx = indices[perm[:num_val]]
     train_idx = indices[perm[num_val:]]
+    # num_workers=0: each shard is a few thousand in-RAM samples and the model
+    # is tiny, so worker processes cost far more than the loading they do --
+    # and they'd spawn *inside* each Ray actor, oversubscribing the allocation.
     trainloader = DataLoader(
         torch.utils.data.Subset(trainset, train_idx),
-        batch_size=batch_size, shuffle=True, num_workers=2,
+        batch_size=batch_size, shuffle=True, num_workers=0,
         generator=torch.Generator().manual_seed(seed),
     )
     valloader = DataLoader(
         torch.utils.data.Subset(trainset_eval, val_idx),
-        batch_size=batch_size, shuffle=False, num_workers=2,
+        batch_size=batch_size, shuffle=False, num_workers=0,
     )
     return trainloader, valloader
 
@@ -90,7 +91,7 @@ def _client_test_loader(indices, testset, batch_size, seed):
         return ''
     return DataLoader(
         torch.utils.data.Subset(testset, indices),
-        batch_size=batch_size, shuffle=True, num_workers=2,
+        batch_size=batch_size, shuffle=True, num_workers=0,
         generator=torch.Generator().manual_seed(seed),
     )
 
@@ -273,7 +274,6 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-#CREATE SKEW WITH INDEPENDENT TESTSETS!!
 def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
     """Same per-class Dirichlet skew as `skew_class_niid_train_common_test`,
     but the same per-class proportions (`dirichlet_props`, drawn once from
@@ -437,13 +437,7 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
     # SPLIT DIRICHLET DISTRIBUTION
-    #alpha = [10., 1., 1., 2., 2., 1., 1., 10. ]
-    #alpha = [20., 1., 2., 4., 4., 2., 1., 20. ]
     alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
-    #alpha = [1., 1., 1., 20., 1., 1., 1., 40., 40., 1., 1., 1., 20., 1., 1., 1. ]
-    #alpha = [1., 1., 1., 20., 1., 1., 1., 60., 60., 1., 1., 1., 1., 100., 1., 1. ]
-    #alpha = [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1. ]
-    #dirich = np.random.dirichlet([alpha]*len(clients_with_data))
     dirich = np.random.dirichlet(alpha)
 
     partition_len_train = [0] * num_clients

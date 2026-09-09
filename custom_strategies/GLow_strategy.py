@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Topology-based decentralized gossip learning strategy [Belenguer et al., 2025].
-
-Manuscript: ###############
-
+"""
 Rotating-head design: each round one node in `topology` is head
 (`select_head`), its up-neighbours train from the head's parameters
 (`get_up_neighbors`), `aggregate_fit` folds results back into
@@ -52,7 +49,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.history import History
 
-from flwr_lib_modifications.aggregate import aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_1, aggregate_score_centroids_2, aggregate_median, weighted_loss_avg
+from flwr_lib_modifications.aggregate import aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -71,7 +68,6 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 # pylint: disable=line-too-long
 class GLow_strategy(Strategy):
     """Decentralized gossip-learning strategy. https://arxiv.org/abs/2501.10463
-
     See module docstring for the rotating-head mechanic.
     """
 
@@ -151,32 +147,22 @@ class GLow_strategy(Strategy):
         self.save_path = save_path
         self.warmup_rounds = warmup_rounds
         self.warmup_epochs = warmup_epochs
-
-        # per-node list of neighbour accuracies/params
-        self.neigh_metrics = []
-        for i in range(min_available_clients):
-            self.neigh_metrics.append([])
-            for j in topology[i]:
-                self.neigh_metrics[i].append(None)
-
-
         self.head_switch_down = head_switch_down
         self.head_switch_up = head_switch_up
         self.head_switch_malicious = head_switch_malicious
         self.head_status = head_status
         self.head_nature = head_nature
-
-        # ClientProxy.cid -> topology index; opaque simulation id, not the
-        # index itself, so this map has to be built once (initialize_parameters).
+        # ClientProxy.cid -> topology index; simulation ID maps to client ID
         self._cid_to_index: Dict[str, int] = {}
-
-        # run_simulation() discards Server.fit()'s History, so we accumulate
-        # an equivalent one ourselves.
         self.history = History()
-
-        # Caches aggregate_fit()'s per-neighbour eval so evaluate() doesn't
-        # redo it (except the head, whose parameters just changed).
+        # Caches aggregate_fit()'s per-neighbour eval for neighbours
         self._last_eval_results = {}
+        # per-node list of neighbour accuracies/params
+        self.neigh_metrics = []
+        for i in range(min_available_clients):
+            self.neigh_metrics.append([])
+            for j in range(min_available_clients):
+                self.neigh_metrics[i].append(None)
 
     def _round_seed(self, server_round: int, node_index: int) -> int:
         """Per-(round, node) seed offset -- keeps RNG state independent of
@@ -214,7 +200,9 @@ class GLow_strategy(Strategy):
                     self.head_losses[agent] = None
                     self.head_f1[agent] = None
                     self.head_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
-                    self.neigh_metrics[agent] = [None]
+                    # full-length: neigh_metrics rows are indexed by node id, so
+                    # this row must still hold a slot for `agent` itself
+                    self.neigh_metrics[agent] = [None] * self.min_available_clients
                     self.head_parameters[agent] = self.initial_parameters[agent]
 
     def select_head(self):
@@ -308,15 +296,12 @@ class GLow_strategy(Strategy):
         if self.evaluate_fn is None:
             return None
 
-        # Set when neighbour == selected_head; every topology row must
-        # include its own index (see module docstring).
         head_loss = None
         head_metrics = None
 
         up_neighbours = self.get_up_neighbors()
         for i, neighbour in enumerate(up_neighbours):
-            # Reuse aggregate_fit()'s eval for every neighbour except the
-            # head, whose parameters it just changed.
+            # Just recompute eval in head, whose parameters just changed.
             if neighbour != self.selected_head and neighbour in self._last_eval_results:
                 loss, metrics = self._last_eval_results[neighbour]
             else:
@@ -330,7 +315,7 @@ class GLow_strategy(Strategy):
                 loss, metrics = eval_res
                 self._last_eval_results[neighbour] = (loss, metrics)
 
-            self.neigh_metrics[self.selected_head][i] = metrics['acc_cntrl']
+            self.neigh_metrics[self.selected_head][neighbour] = metrics['acc_cntrl']
 
             if neighbour == self.selected_head:
                 self.head_losses[self.selected_head] = loss
@@ -360,8 +345,9 @@ class GLow_strategy(Strategy):
     ) -> List[Tuple[ClientProxy, FitIns]]:
         """Rotate head, build one FitIns per up-neighbour from the head's
         parameters."""
-
+        
         self.select_head()
+        connections = self.get_up_neighbors()
 
         class select_criterion(Criterion):
             def __init__(self, cid_list):
@@ -369,14 +355,9 @@ class GLow_strategy(Strategy):
             def select(self, client: ClientProxy) -> bool:
                 return client.cid in self.cid_list
 
-        connections = self.get_up_neighbors()
-
         clients = client_manager.sample(
             num_clients=len(connections), criterion=select_criterion(self._cids_for_indices(connections))
         )
-
-        # Dispatch order doesn't matter -- every aggregate_* consumer
-        # re-sorts by neighbour index (flwr_lib_modifications/aggregate.py).
         pairs = []
         for client in clients:
             index = self._cid_to_index[client.cid]
@@ -445,9 +426,12 @@ class GLow_strategy(Strategy):
         if not self.accept_failures and failures:
             return None, {}
 
+        # Flower returns results in client completion order, which Ray varies
+        # run to run -- pin it so aggregation and metrics are reproducible
+        results = sorted(results, key=lambda r: self._cid_to_index[r[0].cid])
 
         # Re-evaluate each up-neighbour's pre-aggregation parameters to
-        # refresh neigh_metrics (trust signal for the strategies below).
+        # refresh neigh_metrics
         up_neighbours = self.get_up_neighbors()
         for i, neighbour in enumerate(up_neighbours):
             parameters_ndarrays = parameters_to_ndarrays(self.head_parameters[neighbour])
@@ -458,7 +442,7 @@ class GLow_strategy(Strategy):
                 return None, {}
             loss, metrics = eval_res
             self._last_eval_results[neighbour] = (loss, metrics)
-            self.neigh_metrics[self.selected_head][i] = metrics['acc_cntrl']
+            self.neigh_metrics[self.selected_head][neighbour] = metrics['acc_cntrl']
 
             if neighbour == self.selected_head:
                 self.head_losses[self.selected_head] = loss
@@ -466,8 +450,7 @@ class GLow_strategy(Strategy):
                 self.head_f1[self.selected_head] = metrics['macro_f1']
                 self.head_preds_per_class[self.selected_head] = metrics['preds_per_class']
 
-        # ClientProxy.cid is an opaque simulation id, not the topology index
-        # -- translate via _cid_to_index.
+        # ClientProxy.cid is a simulation id, needs to be mapped to client ID
         results_by_index = {
             self._cid_to_index[cli.cid]: fit_res for cli, fit_res in results
         }
@@ -478,16 +461,12 @@ class GLow_strategy(Strategy):
             aggregated_ndarrays = aggregate_score(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head)
         elif self.aggregation == 'score_validation':
             aggregated_ndarrays = aggregate_score_validation(results_by_index, up_neighbours, self.selected_head)
-        elif self.aggregation == 'approach_1':
-            aggregated_ndarrays = aggregate_score_centroids_1(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head, self.current_round, self.num_classes, .5)
         elif self.aggregation == 'approach_2':
             aggregated_ndarrays = aggregate_score_centroids_2(results_by_index, up_neighbours, self.selected_head, self.current_round, self.class_client_matrix_train, self.num_classes, 0.4, 0.6, 0.)
         else:
-            # aggregate() has a different signature -- surface unknown
-            # aggregation values explicitly instead of a confusing TypeError.
             raise ValueError(
                 f"Unknown aggregation strategy '{self.aggregation}'. Expected one of: "
-                "'inplace', 'score', 'score_validation', 'approach_1', 'approach_2'."
+                "'inplace', 'score', 'score_validation', 'approach_2'."
             )
 
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
@@ -499,8 +478,7 @@ class GLow_strategy(Strategy):
         elif server_round == 1:
             log(WARNING, "No fit_metrics_aggregation_fn provided")
 
-        # Only the head's own parameters are updated -- neighbours keep
-        # theirs until a round where they're themselves head.
+        # Only the head's own parameters are updated
         self.head_parameters[self.selected_head] = parameters_aggregated
 
         self.history.add_metrics_distributed_fit(server_round=server_round, metrics=metrics_aggregated)
@@ -518,6 +496,9 @@ class GLow_strategy(Strategy):
             return None, {}
         if not self.accept_failures and failures:
             return None, {}
+
+        # see aggregate_fit: completion order is not reproducible
+        results = sorted(results, key=lambda r: self._cid_to_index[r[0].cid])
 
         loss_aggregated = weighted_loss_avg(
             [

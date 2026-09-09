@@ -1,7 +1,7 @@
 # GLow - A Flower Based GL Strategy
 GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed systems using the **Flower Framework**. The implementation is able to simulate a fully decentraliced network composed by virtual network agents (disposed in different toplogies) that perform parameter aggregation with their neighbors. Modularity is an essential part of the system making the usage of different datasets, models and run configurations easy to integrate. Although the [Flower Framework](https://flower.ai/docs/framework/how-to-implement-strategies.html) guidelines for strategy implementation are followed, GLow differs from a centralized FL scheme -- there is no aggregation server and each agent operates as client and server at the same time (P2P). Further explanations of the strategy are found in [GLow - A Novel, Flower-Based Simulated Gossip Learning Strategy](https://www.sciencedirect.com/science/article/pii/S074373152600050X?via%3Dihub) manuscript. Moreover, custom decentralized aggregation algorithms *ScoreAVG* and dynamic run time behavior customization are implemented -- nodes can go up/down or malicious (model poisoning) during simulation execution.
 
-Moreover, a Centralized (CNL) and a Centralized Federated Learning (CFL) version of the system are provided as well; in order to have a wider testbench and give researchers a robust comparison baseline -- they are completely integrated with parts of GLow implementation and configuration.
+Moreover, a Centralized (CNL) version of the system is provided as well; in order to have a wider testbench and give researchers a robust comparison baseline -- it is completely integrated with parts of GLow implementation and configuration.
 
 ## Directory structure
 - **conf (configuration files)**: YAML configuration files
@@ -13,6 +13,7 @@ Moreover, a Centralized (CNL) and a Centralized Federated Learning (CFL) version
 
 ## Installation and Dependencies
 Built upon Flower 1.30.0 and setuptools v65.0.0 -- using Python 3.10.
+The simulator runs CPU-only: the simulated agents represent IoT-class devices, and a single device choice keeps runs reproducible across hosts.
 As the [pyproject.toml](pyproject.toml) file is present, just run:
 ```sh 
 uv sync
@@ -20,7 +21,7 @@ uv sync
 > Note: Using [uv](https://docs.astral.sh/uv/guides/install-python/) will setup the whole project and dependencies automatically.
 
 ## Dataset
-Download or create a custom dataset, the implementation is currently designed to work with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) which should be downloaded, extracted and placed into the [dataset](../dataset) directory.
+Download or create a custom dataset, the implementation is currently designed to work with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) which should be downloaded, extracted and placed into the [dataset](./datasets) directory.
 
 ## Configuration files
 
@@ -31,12 +32,11 @@ Configuration files in GLow are composed by a base file and a topology file.
 
 Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
-- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_1'*, *'approach_2'*
+- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*
 - **topology:** str; path to yaml file containing system topology
 - **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
 - **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*,
 *'skew_class_niid_train_common_test'*, *'skew_class_niid_train_niid_test'*
-- **device:** str; select among *CPU*, *GPU*, *H100*
 - **num_rounds:** int; total number of communication rounds
 - **batch_size:** int; hyperparameter for DataLoader
 - **num_classes:** int; output layer size
@@ -74,14 +74,18 @@ Example file located in [conf/topologies/graph_8_2/graph_1.yaml](conf/topologies
 
 The following execution variants are allowed with their corresponding HPC deployment scripts -- depending on the execution target: (1) Single run unique topology. (2) Multiple simulations multiple topologies.
 
-### Single run (without arguments) -- Recommended
-[Hydra Framework](https://hydra.cc/) is used to allow researchers track simulation outputs easily. It is recommended for executions involving custom topologies -- an specific graph. 
+### Single runs (with arguments)
 
-```sh 
-python3 hydra_main.py
+Following the same structure of [mult_exp.sh](./mult_exp.sh), script [sing_run.sh](./sing_exp.sh) is provided for launching an specific inter-connectied graph generated by [generate_topology.ipynb](./generate_topology.ipynb).
+
+```sh
+sh sing_exp.sh main.py <conf_file.yaml> <run_time_file.yaml> <run_name>  <specific topology ID>
 ```
-A directory containing current date, time and all execution outputs is created by Hydra.
-> Note: line '@hydra.main(config_path="conf", config_name="base", version_base=None)' in *hydra_main.py* specifies configuration file location.
+Example:
+```sh
+./sing_exp.sh main.py conf/topologies/graph_8_2/base.yaml conf/topologies/graph_8_2/runtime.yaml graph_8_2 1
+```
+> Note: Topology ID is an integer corresponding to the interconnection degree.
 
 ### Multiple runs (with arguments)
 
@@ -98,19 +102,6 @@ Example:
 A directory named *run_name* is created in [outputs](./outputs/) to store execution results.
 > Note: Deployment script [mult_exp.sh](/mult_exp.sh) has to be configured for Python or Slurm usage.
 
-### Single runs (with arguments)
-
-Following the same structure of [mult_exp.sh](./mult_exp.sh), script [sing_run.sh](./sing_exp.sh) is provided for launching an specific inter-connectied graph generated by [generate_topology.ipynb](./generate_topology.ipynb).
-
-```sh
-sh sing_exp.sh main.py <conf_file.yaml> <run_time_file.yaml> <run_name>  <specific topology ID>
-```
-Example:
-```sh
-./sing_exp.sh main.py conf/topologies/graph_8_2/base.yaml conf/topologies/graph_8_2/runtime.yaml graph_8_2 1
-```
-> Note: Topology ID is an integer corresponding to the interconnection degree.
-
 ## Results
 The output of each experiment consists in the following files:
 
@@ -120,27 +111,21 @@ The output of each experiment consists in the following files:
 - **\<run_id>_raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *macro_f1*, *Exec_time*
 - **\<run_id>_parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
 
-### Executions with Hydra
-Hydra creates a nested directory with current date and times at the moment experiments are launched. Additional files and directories are created in this execution variant
-
-- **hydra_main.log:** Full system log for debbuging
-- **.hydra/**
-    - **config.yaml:** A copy of the configuration file specified in *@hydra.main(...)*
-    - **...**
-
 ## Visualization
 
-This section is oriented for visualization of the results obtained from *multiple runs*; experiments testing system convergence by the degree of inter-connectivity -- from fully disconnected to fully connected.
+This section is oriented for visualization of the results obtained from *multiple runs*; experiments testing system convergence by the degree of inter-connectivity -- from fully disconnected to fully connected. Moreover, a version for visualizing the results from FedAVG is available as well.
 
-- **example_visualization_results:** Example of how to plot (for convergence performance comparison) executions of *inplace*, *score*, *score_validation* and *approach_2* on a given topology.
+- **8_visualize_results:** Visualize GLow experiments for an 8 agent scenario
+- **16_visualize_results:** Visualize GLow experiments for an 16 agent scenario
+- **FL_visualize_results:** Visualize FL experiments
 - **draw_graphs:** Draws graphs from YAML files generated with [generate_topology.ipynb](./generate_topology.ipynb)
 
 ## Changes in libraries
 
 Dealing with control nodes with no local data is not a Flower feature. Performing weighted average among network parameters triggers scaling factors realted issues (division by 0). Hence, *aggregate_inplace()*  method of [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py) is modified. Scaling factor for nodes with no local data is set to 1.0 -- no scaling factor applied.
-Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *aggregate_inplace()*, *aggregate_score()*, *aggregate_score_validation()*, *aggregate_score_centroids_1()*, *aggregate_score_centroids_2()*.
+Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *aggregate_inplace()*, *aggregate_score()*, *aggregate_score_validation()*, *aggregate_score_centroids_2()*.
 
-If having problems with Ray Scalability (regarding dataset, python and ray versions), check [flwr/simulation/app.py](/flwr_lib_modifications/app.py).
+Ray sizes its actor pool and object store from the whole node rather than from a SLURM allocation, which oversubscribes the job's memory. `main.py`'s `slurm_ray_init_args()` derives the real limits from `SLURM_CPUS_PER_TASK`/`SLURM_MEM_PER_CPU` and passes them to Ray via `backend_config['init_args']`. Set `GLOW_RAY_TMP` (short absolute path, e.g. `/scratch/$USER/ray`) to keep Ray's session directory off `/tmp`, and cap `OMP_NUM_THREADS` to match `client_resources`' `num_cpus`.
 
 > Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py).
 

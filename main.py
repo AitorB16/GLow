@@ -1,7 +1,7 @@
-"""Argv-driven single-run entrypoint: `python3 main.py <base.yaml>
-<topology.yaml> <runtime.yaml> <run_id>` (invoked by sing/mult_exp.sh; see
-hydra_main.py for the Hydra-decorated alternative)."""
+"""Argv-driven entrypoint: `python3 main.py <base.yaml>
+<topology.yaml> <runtime.yaml> <run_id>` (invoked by sing/mult_exp.sh)."""
 
+import os
 import sys
 import time
 import pickle
@@ -29,6 +29,33 @@ from custom_strategies.GLow_strategy import GLow_strategy
 
 # silence Flower's per-round INFO logging, keep WARNING/ERROR
 logging.getLogger("flwr").setLevel(logging.WARNING)
+
+
+def slurm_ray_init_args():
+    """Ray sizes its object store and actor pool from the whole node, not from
+    the SLURM cgroup -- under sbatch it oversubscribes the allocation by orders
+    of magnitude. Derive the real limits from SLURM's env vars; return {} when
+    not under SLURM so local runs keep Ray's own detection."""
+    cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if not cpus:
+        return {}
+
+    args = {"num_cpus": int(cpus)}
+
+    # --mem sets SLURM_MEM_PER_NODE, --mem-per-cpu sets SLURM_MEM_PER_CPU (both MB)
+    mem_mb = os.environ.get("SLURM_MEM_PER_NODE")
+    if not mem_mb and os.environ.get("SLURM_MEM_PER_CPU"):
+        mem_mb = int(os.environ["SLURM_MEM_PER_CPU"]) * int(cpus)
+    if mem_mb:
+        args["object_store_memory"] = int(int(mem_mb) * 1024 * 1024 * 0.15)
+
+    # /tmp/ray collides between jobs sharing a node and is often tiny on HPC.
+    # Keep GLOW_RAY_TMP short -- Ray opens unix sockets under it (~107 char cap).
+    scratch, job_id = os.environ.get("GLOW_RAY_TMP"), os.environ.get("SLURM_JOB_ID")
+    if scratch and job_id:
+        args["_temp_dir"] = f"{scratch.rstrip('/')}/{job_id}"
+
+    return args
 
 
 def main():
@@ -87,13 +114,12 @@ def main():
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_iid_test':
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
-    elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
+    #elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
+    else:
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
 
-    device = cfg['device']
-
     # 3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(cids, trainloaders, validationloaders, cfg['num_classes'], cfg['seed'], device)
+    client_fn = generate_client_fn(cids, trainloaders, validationloaders, cfg['num_classes'], cfg['seed'])
 
 
     # 4. DEFINE A STRATEGY
@@ -134,19 +160,21 @@ def main():
     server_app = ServerApp(server_fn=server_fn)
     client_app = ClientApp(client_fn=client_fn)
 
-    # Divide GPU resources among agents (very high level)
-    if device == 'GPU':
-        num_gpus = 1.0/tplgy['max_num_clients_per_round']
-    else:
-        num_gpus = 0.
-
 
     # 5. RUN SIMULATIONS
+    # concurrent actors = ray num_cpus // client num_cpus -- raise the latter to
+    # run fewer clients at once if memory is tight
+    backend_config = {'client_resources': {'num_cpus': 2, 'num_gpus': 0.0}}
+    ray_init_args = slurm_ray_init_args()
+    if ray_init_args:
+        backend_config['init_args'] = ray_init_args
+        print(f" -> SLURM detected, pinning Ray to: {ray_init_args}")
+
     run_simulation(
         server_app=server_app,
         client_app=client_app,
         num_supernodes=num_clients,
-        backend_config={'client_resources': {'num_cpus': 2, 'num_gpus': num_gpus}}, #num_gpus 1.0 (clients concurrently; one per GPU) // 0.25 (4 clients per GPU) -> VERY HIGH LEVEL
+        backend_config=backend_config,
     )
     # run_simulation() doesn't return a History -- strategy accumulates its own
     history = strategy.history

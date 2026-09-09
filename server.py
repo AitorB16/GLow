@@ -1,6 +1,6 @@
 """Factories for the two config/eval callbacks GLow_strategy takes as
 constructor args (`on_fit_config_fn`, `evaluate_fn`) -- built once in
-main.py/hydra_main.py and called internally by the strategy every round.
+main.py and called internally by the strategy every round.
 """
 
 from collections import OrderedDict
@@ -36,8 +36,7 @@ def get_evaluate_fn(num_classes: int, testloaders):
         torch.manual_seed(config['seed'])
 
         model = LeNet(num_classes)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        #device = torch.device("mps")
+        device = torch.device("cpu")
 
         params_dict = zip(model.state_dict().keys(), parameters)
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})

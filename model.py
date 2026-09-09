@@ -174,11 +174,15 @@ def test(net, testloader, num_classes, nature, device):
             for c in range(num_classes):
                 centroid[c] += ((labels == c) & (preds == labels)).sum().item()
 
+            # accumulate across batches -- computing f1() after the loop would
+            # score the last batch only
+            f1.update(preds.cpu(), labels.cpu())
+
         if total_size > 0:
             accuracy = correct / total_size
             mask = instances_per_class > 0
             centroid[mask] /= instances_per_class[mask]
-            macro_f1 = f1(preds, labels).item()
+            macro_f1 = f1.compute().item()
         else:
             accuracy = 1./num_classes
             macro_f1 = 0.

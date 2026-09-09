@@ -9,20 +9,16 @@ from collections import OrderedDict
 from typing import Dict, Tuple, List
 from flwr.common import Context, NDArrays, Scalar
 
-import os
 import json
 import torch
 import numpy as np
 import flwr as fl
 from model import LeNet, train, test, compute_prob_matrix
 
-os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8") #Make GPU run deterministic
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
 torch.use_deterministic_algorithms(True, warn_only=True)
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self, cid, trainloader, validationloader, num_classes, seed, device):
+    def __init__(self, cid, trainloader, validationloader, num_classes, seed):
         node_seed = seed #every node starts from the same seed (same initial weights)
         np.random.seed(node_seed)
         torch.manual_seed(node_seed)
@@ -35,8 +31,8 @@ class FlowerClient(fl.client.NumPyClient):
         self.local_acc = None
         self.model = LeNet(num_classes)
         self.num_classes = num_classes
-        self.device = torch.device("cuda" if torch.cuda.is_available() and (device == 'GPU' or device == 'H100') else "cpu")
-        #self.device = torch.device("mps")
+        # simulation is CPU-only: the simulated nodes are IoT-class devices
+        self.device = torch.device("cpu")
 
         self.val_counts = [0] * self.num_classes
         for _, labels in self.validationloader:
@@ -60,6 +56,13 @@ class FlowerClient(fl.client.NumPyClient):
     def get_properties(self, config: Dict[str, Scalar]) -> Dict[str, Scalar]:
         return {"partition_id": self.cid}
 
+    @staticmethod
+    def _num_samples(loader):
+        """Sample count, not batch count -- len(DataLoader) is the number of
+        batches, and rounding up over-weights small shards. Dataless clients
+        hold '' instead of a loader (see dataset.py)."""
+        return len(loader.dataset) if loader != '' else 0
+
     def fit(self, parameters, config):
         """Called once per round for every up-neighbour of this round's head
         (`config['head_cid']`), including the head itself.
@@ -70,28 +73,18 @@ class FlowerClient(fl.client.NumPyClient):
         if self.trainloader != '':
             self.trainloader.generator.manual_seed(config['seed'])
 
-        class_client_matrix = {self.cid: self.val_counts}
-
-        # Determine number of epochs (malicious/else branches are identical --
-        # no actual training-length difference for malicious clients here)
         if int(config['comm_round']) <= config['warmup_rounds']:
             epochs = config['warmup_epochs']
             print(f" -> Client {self.cid}: Warm-up Phase Active! Training for {epochs} epochs.")
-        elif config['nature'] == 'malicious':
-            epochs = config['local_epochs']
         else:
             epochs = config['local_epochs']
 
         # Only the head trains this round -- neighbours just re-evaluate their
         # existing stored parameters (below) and report those, untouched.
-        lr = config['lr']
-        optim = torch.optim.Adam(self.model.parameters(), lr=lr)
+        is_head = config['head_cid'] == self.cid
 
-        metrics_val_distr = 0.
-        centroid = [0] * self.num_classes
-
-        #print("======TRAINING==== cid:", self.cid, "====head_cid:", config['head_cid'])
-        if config['head_cid'] == self.cid:
+        if is_head:
+            optim = torch.optim.Adam(self.model.parameters(), lr=config['lr'])
             _, metrics_val_distr, centroid = train(
                 self.model, self.trainloader, self.validationloader,
                 optim, epochs, self.num_classes, config['nature'], self.device
@@ -103,70 +96,66 @@ class FlowerClient(fl.client.NumPyClient):
             self.num_classes, config['nature'], self.device
         )
 
-        # Head client branch
-        if config['head_cid'] == self.cid:
-            #print("======HERE==== HEAD", config['head_cid'], "====cid===", self.cid)
-            return self.get_parameters({}), len(self.trainloader), {
-                'acc_val_distr': metrics_val_distr,
-                'cid': self.cid,
-                'centroid': json.dumps(centroid.tolist()),
-                'confidence_score': json.dumps(centroid.tolist()),
-                'prob_matrix': json.dumps(prob_matrix.flatten().tolist()),
-                'HEAD': 'YES',
-                'distr_val_loss': '##',
-                'energy used': '10W'
-            }
-
-        # Neighbour clients branch
+        if is_head:
+            centroid_json = json.dumps(centroid.tolist())
+            confidence_score_json = centroid_json  # head reports its own centroid as its confidence too
         elif self.cid in json.loads(config['neighbors']):
-            # Step 1: neighbour's own centroid
-            _, _, neighbour_centroid, _ = test(
-                self.model, self.validation_loaders[self.cid],
-                self.num_classes, config['nature'], self.device
+            confidence_score, metrics_val_distr = self._neighbour_confidence_score(config)
+            centroid_json = json.dumps([])
+            confidence_score_json = json.dumps(confidence_score.tolist())
+        else:
+            raise ValueError(
+                f"Client {self.cid} was asked to fit() but is neither this round's "
+                f"head ({config['head_cid']}) nor listed among its neighbours "
+                f"({config['neighbors']}) -- should be unreachable given how "
+                "configure_fit() samples clients."
             )
 
-            # Step 2: head's centroid
-            _, _, head_centroid, _ = test(
-                self.model, self.validation_loaders[config['head_cid']],
-                self.num_classes, config['nature'], self.device
-            )
+        # No validation samples means train()/test() fall back to 1/num_classes,
+        # and reporting that would earn the node real aggregation weight for a
+        # meaningless number. Covers both '' (no data at all) and a real but
+        # empty loader (a shard too small for val_ratio to carve anything out).
+        if self._num_samples(self.validationloader) == 0:
+            metrics_val_distr = 0.
 
-            # Unwrap if they are lists of tensors
-            if isinstance(neighbour_centroid, list) and len(neighbour_centroid) > 0:
-                neighbour_centroid = neighbour_centroid[0]
-            if isinstance(head_centroid, list) and len(head_centroid) > 0:
-                head_centroid = head_centroid[0]
+        return self.get_parameters({}), self._num_samples(self.trainloader), {
+            'acc_val_distr': metrics_val_distr,
+            'cid': self.cid,
+            'centroid': centroid_json,
+            'confidence_score': confidence_score_json,
+            'prob_matrix': json.dumps(prob_matrix.flatten().tolist()),
+            'HEAD': 'YES' if is_head else 'NO',
+            'distr_val_loss': '##',
+            'energy used': '10W',
+        }
 
-            # Convert to numpy arrays
-            neighbour_centroid = neighbour_centroid.detach().cpu().numpy()
-            head_centroid = head_centroid.detach().cpu().numpy()
+    def _neighbour_confidence_score(self, config):
+        """Returns (confidence_score, val_accuracy) for a non-head node.
 
-            # Step 3: rebuild confidence score
-            confidence_score = []
-            for class_id, c in enumerate(neighbour_centroid):
-                neighbour_has_class = class_client_matrix[self.cid][class_id] > 0
-                if not neighbour_has_class:
-                    confidence_score.append(float(head_centroid[class_id]))
-                else:
-                    confidence_score.append(float(c))
+        Per-class confidence: this neighbour's own centroid where it has local
+        validation data for that class, else its performance on the head's
+        validation set. Both measured against the SAME (untrained-this-round)
+        parameters, since a neighbour doesn't train when it's not head.
 
-            confidence_score = np.array(confidence_score)
-            # Compare neighbour_centroid vs confidence_score element-wise
-            diffs = [(i, float(neighbour_centroid[i]), float(confidence_score[i]))
-                    for i in range(len(neighbour_centroid))
-                    if neighbour_centroid[i] != confidence_score[i]]
-
-            # Return neighbour metrics
-            return self.get_parameters({}), len(self.trainloader), {
-                'acc_val_distr': metrics_val_distr,
-                'cid': self.cid,
-                'centroid': json.dumps([]),
-                'confidence_score': json.dumps(confidence_score.tolist()),
-                'prob_matrix': json.dumps(prob_matrix.flatten().tolist()),
-                'HEAD': 'NO',
-                'distr_val_loss': '##',
-                'energy used': '10W'
-            }
+        `epochs=0` runs train()'s validation pass and skips the epoch loop, so
+        the accuracy a neighbour reports comes from exactly the code path the
+        head uses, on its own validation split -- never the test partition,
+        which clients are not given at all."""
+        _, val_accuracy, neighbour_centroid = train(
+            self.model, self.trainloader, self.validationloader,
+            None, 0, self.num_classes, config['nature'], self.device
+        )
+        _, _, head_centroid, _ = test(
+            self.model, self.validation_loaders[config['head_cid']],
+            self.num_classes, config['nature'], self.device
+        )
+        neighbour_centroid = neighbour_centroid.detach().cpu().numpy()
+        head_centroid = head_centroid.detach().cpu().numpy()
+        confidence_score = np.array([
+            head_centroid[c] if self.val_counts[c] == 0 else neighbour_centroid[c]
+            for c in range(self.num_classes)
+        ])
+        return confidence_score, val_accuracy
 
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         """Distributed-evaluation phase (separate from fit()'s training
@@ -177,19 +166,15 @@ class FlowerClient(fl.client.NumPyClient):
         torch.manual_seed(config['seed'])
         self.set_parameters(parameters)
         loss, accuracy, _, macro_f1 = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
-        return float(loss), len(self.validationloader), {'acc_distr': accuracy, 'macro_f1': macro_f1 , 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
+        return float(loss), self._num_samples(self.validationloader), {'acc_distr': accuracy, 'macro_f1': macro_f1 , 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
 
-def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed, device):
+def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed):
     """Factory Flower calls once per simulated node to construct its
     FlowerClient, via the returned `client_fn(context)` closure."""
     def client_fn(context: Context):
-        # Current Flower identifies simulated clients via context.node_config
-        # (an opaque per-run node id), not a small sequential int -- the
-        # "partition-id" entry is what the simulation backend assigns
-        # deterministically per client, and is the direct replacement for the
-        # old `cid: str` argument this factory used to receive.
+        # Current Flower identifies simulated clients via context.node_config NEED MAPPING
         partition_id = int(context.node_config["partition-id"])
-        return FlowerClient(cids[partition_id], trainloader=trainloaders, validationloader=validationloaders, num_classes=num_classes, seed=seed, device=device).to_client()
+        return FlowerClient(cids[partition_id], trainloader=trainloaders, validationloader=validationloaders, num_classes=num_classes, seed=seed).to_client()
     return client_fn
 
 def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
