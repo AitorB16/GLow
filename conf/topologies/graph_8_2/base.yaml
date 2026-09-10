@@ -1,11 +1,11 @@
 run_name: 'graph_8_2'
-dataset: 'mnist' #'cifar', 'mnist'
+dataset: 'cifar' #'cifar', 'mnist'
 aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_2'
 #topology: './conf/topologies/graph_8_2/custom_1.yaml'
 runtime: './runtime.yaml'
-split_dataset: 'skew_class_niid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
+split_dataset: 'prepare_dataset_iid_train_common_test' #'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', 'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', 'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', 'prepare_dataset_niid_train_niid_test', 'prepare_dataset_niid_class_partition'
 device: cpu
-num_rounds: 20
+num_rounds: 512
 warmup_rounds: 0
 warmup_epochs: 15
 batch_size: 64
