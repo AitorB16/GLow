@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 import sys
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms, utils
 import os
 from itertools import chain
@@ -35,6 +35,31 @@ def get_cifar10(data_path: str = ".datasets"):
     testset = torch_datasets.CIFAR10(data_path, train=False, download=True, transform=transform_test)
 
     return trainset, trainset_eval, testset
+
+def get_mnist(data_path: str = ".datasets"):
+    """Downlaod MNIST and apply a simple transform."""
+    #ssl._create_default_https_context = ssl._create_unverified_context
+
+    transform = transforms.Compose(
+        [transforms.Resize((32,32)),
+         transforms.ToTensor(),
+         transforms.Normalize((0.5,), (0.5,))
+        ])
+
+    trainset = torch_datasets.MNIST(root=data_path, train=True, download=True, transform=transform)
+    trainset_eval = torch_datasets.MNIST(data_path, train=True, download=False, transform=transform)
+    testset = torch_datasets.MNIST(root=data_path, train=False, download=True, transform=transform)
+
+    return trainset, trainset_eval, testset
+
+def _get_dataset(dataset: str):
+    """(trainset, trainset_eval, testset) for `dataset`. Single dispatch point
+    for every prepare_* below."""
+    if dataset == 'cifar':
+        return get_cifar10()
+    if dataset == 'mnist':
+        return get_mnist()
+    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar' or 'mnist'.")
 
 
 def _clients_with_data(num_clients: int, clients_with_no_data: list[int]) -> list[int]:
@@ -69,9 +94,6 @@ def _client_train_val_loaders(indices, trainset, trainset_eval, val_ratio, batch
     num_val = int(val_ratio * len(indices))
     val_idx = indices[perm[:num_val]]
     train_idx = indices[perm[num_val:]]
-    # num_workers=0: each shard is a few thousand in-RAM samples and the model
-    # is tiny, so worker processes cost far more than the loading they do --
-    # and they'd spawn *inside* each Ray actor, oversubscribing the allocation.
     trainloader = DataLoader(
         torch.utils.data.Subset(trainset, train_idx),
         batch_size=batch_size, shuffle=True, num_workers=0,
@@ -95,14 +117,13 @@ def _client_test_loader(indices, testset, batch_size, seed):
         generator=torch.Generator().manual_seed(seed),
     )
 
-
-def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
     """IID training data (equal-sized random splits) plus one shared test set
     identical for every client."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -153,7 +174,7 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
-def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data: one Dirichlet draw (fixed
     8-length `alpha`, i.e. sized for an 8-client topology) sizes a contiguous
     slice of the class-sorted train set per client. Test set is shared for
@@ -161,7 +182,7 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -217,7 +238,7 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
-def skew_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+def skew_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
     """"Fine" per-class Dirichlet skew (`alpha<0.1`, strongly skewed): each
     class is independently Dirichlet-split across `clients_with_data`, giving
     direct per-client per-class control -- the standard FL class-skew
@@ -227,7 +248,7 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     labels_train = np.array(trainset.targets)
     labels_test = np.array(testset.targets)
     client_indices = [[] for _ in range(num_clients)]
@@ -274,7 +295,7 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
     """Same per-class Dirichlet skew as `skew_class_niid_train_common_test`,
     but the same per-class proportions (`dirichlet_props`, drawn once from
     the train split) are reapplied to independently partition the test set --
@@ -285,7 +306,7 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     labels_train = np.array(trainset.targets)
     labels_test = np.array(testset.targets)
     client_indices = [[] for _ in range(num_clients)]
@@ -349,13 +370,13 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
     """IID training data plus an independently IID-partitioned test set,
     split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -420,13 +441,13 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, val_ratio: float = 0.1):
+def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data plus an independently IID-partitioned
     test set split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -496,7 +517,7 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int,  val_ratio: float = 0.1):
+def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data plus
     a test set skewed the same way: the identical `dirich` proportions drawn
     for the train split slice the independent, class-sorted test set into
@@ -504,7 +525,7 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = get_cifar10()
+    trainset, trainset_eval, testset = _get_dataset(dataset)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 

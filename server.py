@@ -4,7 +4,7 @@ main.py and called internally by the strategy every round.
 """
 
 from collections import OrderedDict
-from model import LeNet, test, compute_prob_matrix
+from models import build_model, test, compute_prob_matrix
 import torch
 
 def get_on_fit_config(config):
@@ -25,7 +25,7 @@ def get_on_fit_config(config):
 
     return fit_config_fn
 
-def get_evaluate_fn(num_classes: int, testloaders):
+def get_evaluate_fn(num_classes: int, testloaders, dataset: str):
     """Returns the `evaluate_fn(sid, server_round, parameters, config)`
     GLow_strategy.evaluate() calls each round to score `parameters` against
     a specific node's own test set (`testloaders[sid]`) -- GLow's
@@ -35,7 +35,7 @@ def get_evaluate_fn(num_classes: int, testloaders):
     def evaluate_fn(sid: int, server_round: int, parameters, config): #int nparrays, dict
         torch.manual_seed(config['seed'])
 
-        model = LeNet(num_classes)
+        model = build_model(dataset, num_classes)
         device = torch.device("cpu")
 
         params_dict = zip(model.state_dict().keys(), parameters)

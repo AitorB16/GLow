@@ -13,12 +13,12 @@ import json
 import torch
 import numpy as np
 import flwr as fl
-from model import LeNet, train, test, compute_prob_matrix
+from models import build_model, train, test, compute_prob_matrix
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self, cid, trainloader, validationloader, num_classes, seed):
+    def __init__(self, cid, trainloader, validationloader, num_classes, dataset, seed):
         node_seed = seed #every node starts from the same seed (same initial weights)
         np.random.seed(node_seed)
         torch.manual_seed(node_seed)
@@ -29,9 +29,8 @@ class FlowerClient(fl.client.NumPyClient):
         self.trainloader = trainloader[cid]
         self.validationloader = validationloader[cid]
         self.local_acc = None
-        self.model = LeNet(num_classes)
+        self.model = build_model(dataset, num_classes)
         self.num_classes = num_classes
-        # simulation is CPU-only: the simulated nodes are IoT-class devices
         self.device = torch.device("cpu")
 
         self.val_counts = [0] * self.num_classes
@@ -111,10 +110,6 @@ class FlowerClient(fl.client.NumPyClient):
                 "configure_fit() samples clients."
             )
 
-        # No validation samples means train()/test() fall back to 1/num_classes,
-        # and reporting that would earn the node real aggregation weight for a
-        # meaningless number. Covers both '' (no data at all) and a real but
-        # empty loader (a shard too small for val_ratio to carve anything out).
         if self._num_samples(self.validationloader) == 0:
             metrics_val_distr = 0.
 
@@ -168,13 +163,13 @@ class FlowerClient(fl.client.NumPyClient):
         loss, accuracy, _, macro_f1 = test(self.model, self.validationloader, self.num_classes, config['nature'], self.device)
         return float(loss), self._num_samples(self.validationloader), {'acc_distr': accuracy, 'macro_f1': macro_f1 , 'cid': self.cid} #send anything, time it took to evaluation, memory usage...
 
-def generate_client_fn(cids, trainloaders, validationloaders, num_classes, seed):
+def generate_client_fn(cids, trainloaders, validationloaders, num_classes, dataset, seed):
     """Factory Flower calls once per simulated node to construct its
     FlowerClient, via the returned `client_fn(context)` closure."""
     def client_fn(context: Context):
         # Current Flower identifies simulated clients via context.node_config NEED MAPPING
         partition_id = int(context.node_config["partition-id"])
-        return FlowerClient(cids[partition_id], trainloader=trainloaders, validationloader=validationloaders, num_classes=num_classes, seed=seed).to_client()
+        return FlowerClient(cids[partition_id], trainloader=trainloaders, validationloader=validationloaders, num_classes=num_classes, dataset=dataset, seed=seed).to_client()
     return client_fn
 
 def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:

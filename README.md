@@ -1,8 +1,6 @@
 # GLow - A Flower Based GL Strategy
 GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed systems using the **Flower Framework**. The implementation is able to simulate a fully decentraliced network composed by virtual network agents (disposed in different toplogies) that perform parameter aggregation with their neighbors. Modularity is an essential part of the system making the usage of different datasets, models and run configurations easy to integrate. Although the [Flower Framework](https://flower.ai/docs/framework/how-to-implement-strategies.html) guidelines for strategy implementation are followed, GLow differs from a centralized FL scheme -- there is no aggregation server and each agent operates as client and server at the same time (P2P). Further explanations of the strategy are found in [GLow - A Novel, Flower-Based Simulated Gossip Learning Strategy](https://www.sciencedirect.com/science/article/pii/S074373152600050X?via%3Dihub) manuscript. Moreover, custom decentralized aggregation algorithms *ScoreAVG* and dynamic run time behavior customization are implemented -- nodes can go up/down or malicious (model poisoning) during simulation execution.
 
-Moreover, a Centralized (CNL) version of the system is provided as well; in order to have a wider testbench and give researchers a robust comparison baseline -- it is completely integrated with parts of GLow implementation and configuration.
-
 ## Directory structure
 - **conf (configuration files)**: YAML configuration files
 - **conf/topologies (topologies architecture and run time instructions)**: YAML files describing system topology and run time behavior
@@ -21,7 +19,7 @@ uv sync
 > Note: Using [uv](https://docs.astral.sh/uv/guides/install-python/) will setup the whole project and dependencies automatically.
 
 ## Dataset
-Download or create a custom dataset, the implementation is currently designed to work with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) which should be downloaded, extracted and placed into the [dataset](./datasets) directory.
+The implementation works with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) and [MNIST](https://pytorch.org/vision/main/generated/torchvision.datasets.MNIST.html), selected with the **dataset** key. Both are downloaded on first run into the [.datasets](./.datasets) directory.
 
 ## Configuration files
 
@@ -32,6 +30,7 @@ Configuration files in GLow are composed by a base file and a topology file.
 
 Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
+- **dataset:** str; dataset and its model, select among *'cifar'*, *'mnist'*
 - **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*
 - **topology:** str; path to yaml file containing system topology
 - **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
@@ -131,7 +130,7 @@ Ray sizes its actor pool and object store from the whole node rather than from a
 
 > Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py).
 
-## Author
+## Authors
 
 * **Aitor Belenguer** 
 

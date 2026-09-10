@@ -15,7 +15,7 @@ import numpy as np
 
 import yaml
 
-from dataset import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
+from datasets import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average,
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -49,8 +49,6 @@ def slurm_ray_init_args():
     if mem_mb:
         args["object_store_memory"] = int(int(mem_mb) * 1024 * 1024 * 0.15)
 
-    # /tmp/ray collides between jobs sharing a node and is often tiny on HPC.
-    # Keep GLOW_RAY_TMP short -- Ray opens unix sockets under it (~107 char cap).
     scratch, job_id = os.environ.get("GLOW_RAY_TMP"), os.environ.get("SLURM_JOB_ID")
     if scratch and job_id:
         args["_temp_dir"] = f"{scratch.rstrip('/')}/{job_id}"
@@ -103,23 +101,30 @@ def main():
     
     # 2. PREAPRE YOUR DATASET
     if cfg['split_dataset'] == 'prepare_dataset_iid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'skew_class_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'skew_class_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'prepare_dataset_iid_train_iid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'prepare_dataset_niid_train_iid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
-    #elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     else:
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'])
+        raise ValueError(
+            f"Unknown split_dataset '{cfg['split_dataset']}'. Expected one of: "
+            "'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', "
+            "'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', "
+            "'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', "
+            "'prepare_dataset_niid_train_niid_test'."
+        )
 
     # 3. DEFINE YOUR CLIENTS
-    client_fn = generate_client_fn(cids, trainloaders, validationloaders, cfg['num_classes'], cfg['seed'])
+    client_fn = generate_client_fn(cids, trainloaders, validationloaders, cfg['num_classes'], cfg['dataset'], cfg['seed'])
 
 
     # 4. DEFINE A STRATEGY
@@ -130,7 +135,7 @@ def main():
         fraction_evaluate=0.00001,
         min_available_clients=num_clients,
         on_fit_config_fn=get_on_fit_config(cfg['config_fit']),
-        evaluate_fn=get_evaluate_fn(cfg['num_classes'], testloaders),
+        evaluate_fn=get_evaluate_fn(cfg['num_classes'], testloaders, cfg['dataset']),
         fit_metrics_aggregation_fn = cli_val_distr,
         evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
         total_rounds = cfg['num_rounds'],
@@ -146,6 +151,7 @@ def main():
         save_path = save_path,
         warmup_rounds = cfg['warmup_rounds'],
         warmup_epochs = cfg['warmup_epochs'],
+        dataset = cfg['dataset'],
     )
 
     server_config = ServerConfig(num_rounds=cfg['num_rounds'])
@@ -162,9 +168,7 @@ def main():
 
 
     # 5. RUN SIMULATIONS
-    # concurrent actors = ray num_cpus // client num_cpus -- raise the latter to
-    # run fewer clients at once if memory is tight
-    backend_config = {'client_resources': {'num_cpus': 2, 'num_gpus': 0.0}}
+    backend_config = {'client_resources': {'num_cpus': 4, 'num_gpus': 0.0}}
     ray_init_args = slurm_ray_init_args()
     if ray_init_args:
         backend_config['init_args'] = ray_init_args
@@ -189,7 +193,6 @@ def main():
     print('#################')
     print(str(history.metrics_distributed))
     print('#################')
-    # preds_per_class excluded from this console dump -- full version goes to _result_matrix.out
     print(str({k: v for k, v in history.metrics_centralized.items() if k != 'preds_per_class'}))
 
     out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])

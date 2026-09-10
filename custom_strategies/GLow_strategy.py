@@ -26,7 +26,7 @@ import flwr
 import numpy as np
 from collections import OrderedDict
 import torch
-from model import LeNet
+from models import build_model
 
 from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -108,6 +108,7 @@ class GLow_strategy(Strategy):
         save_path: str,
         warmup_rounds: Optional[int] = None,
         warmup_epochs: int = 15,
+        dataset: str = 'cifar',
     ) -> None:
         super().__init__()
 
@@ -147,6 +148,7 @@ class GLow_strategy(Strategy):
         self.save_path = save_path
         self.warmup_rounds = warmup_rounds
         self.warmup_epochs = warmup_epochs
+        self.dataset = dataset
         self.head_switch_down = head_switch_down
         self.head_switch_up = head_switch_up
         self.head_switch_malicious = head_switch_malicious
@@ -200,8 +202,6 @@ class GLow_strategy(Strategy):
                     self.head_losses[agent] = None
                     self.head_f1[agent] = None
                     self.head_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
-                    # full-length: neigh_metrics rows are indexed by node id, so
-                    # this row must still hold a slot for `agent` itself
                     self.neigh_metrics[agent] = [None] * self.min_available_clients
                     self.head_parameters[agent] = self.initial_parameters[agent]
 
@@ -280,7 +280,7 @@ class GLow_strategy(Strategy):
         param_path = self.save_path + str(self.run_id) + '_parameters/'
         os.makedirs(param_path, exist_ok=True)
         for cli_ID in range(self.min_available_clients):
-            net = LeNet(self.num_classes)
+            net = build_model(self.dataset, self.num_classes)
             cli_params_ndarrays = parameters_to_ndarrays(self.head_parameters[cli_ID])
             params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
             state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})

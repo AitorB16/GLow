@@ -16,25 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-class Net(nn.Module):  # unused (no caller); kept as an alternate architecture
-    def __init__(self, num_classes: int) -> None:
-        super(Net, self).__init__()
-
-        # define the layers
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, num_classes)
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 5 * 5)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
-    
+#CIFAR
 class LeNet(nn.Module):
     """3-conv-layer CNN sized for CIFAR10's 32x32x3 inputs, parameterized
     only by `num_classes`."""
@@ -59,6 +41,44 @@ class LeNet(nn.Module):
       x = self.dropout1(x) # Applying dropout b/t layers which exchange highest parameters. This is a good practice
       x = self.fc2(x)
       return x
+
+#MNIST
+class LeNet5(nn.Module):
+    """Classic LeNet-5 conv/tanh/maxpool architecture, parameterized only by
+    `num_classes` (MNIST uses 10)."""
+    def __init__(self, num_classes):
+        super().__init__()
+        self.num_classes = num_classes
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 6, kernel_size = 5),
+            nn.Tanh(),
+            nn.MaxPool2d(kernel_size = 2),
+            nn.Conv2d(6, 16, kernel_size = 5),
+            nn.Tanh(),
+            nn.MaxPool2d(kernel_size = 2)
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(16*5*5, 120),
+            nn.Tanh(),
+            nn.Linear(120, 84),
+            nn.Tanh(),
+            nn.Linear(84, num_classes)  
+        )
+    def forward(self, x):
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        logit = self.classifier(x)
+        return logit
+
+def build_model(dataset: str, num_classes: int) -> nn.Module:
+    """Architecture for `dataset`: LeNet (3-channel, CIFAR) or LeNet5
+    (1-channel, MNIST). Single source of truth -- client, server, strategy
+    and the centralized baseline all build models through here."""
+    if dataset == 'cifar':
+        return LeNet(num_classes)
+    if dataset == 'mnist':
+        return LeNet5(num_classes)
+    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar' or 'mnist'.")
 
 
 def train(net, trainloader, validationloader, optimizer, epochs, num_classes, nature, device):
@@ -173,9 +193,7 @@ def test(net, testloader, num_classes, nature, device):
 
             for c in range(num_classes):
                 centroid[c] += ((labels == c) & (preds == labels)).sum().item()
-
-            # accumulate across batches -- computing f1() after the loop would
-            # score the last batch only
+            
             f1.update(preds.cpu(), labels.cpu())
 
         if total_size > 0:
@@ -183,6 +201,7 @@ def test(net, testloader, num_classes, nature, device):
             mask = instances_per_class > 0
             centroid[mask] /= instances_per_class[mask]
             macro_f1 = f1.compute().item()
+            loss = loss / len(testloader)
         else:
             accuracy = 1./num_classes
             macro_f1 = 0.
