@@ -108,7 +108,7 @@ class GLow_strategy(Strategy):
         save_path: str,
         warmup_rounds: Optional[int] = None,
         warmup_epochs: int = 15,
-        dataset: str = 'cifar',
+        dataset: str = 'mnist',
     ) -> None:
         super().__init__()
 
@@ -120,6 +120,7 @@ class GLow_strategy(Strategy):
 
         self.total_rounds = total_rounds
         self.current_round = 0
+        self.cur_glob_round = 0
         self.topology = topology
         self.aggregation = aggregation
         self.fraction_fit = fraction_fit
@@ -142,12 +143,14 @@ class GLow_strategy(Strategy):
         self.head_f1 = [None] * self.min_available_clients
         self.head_preds_per_class = [np.zeros((num_classes, num_classes), dtype=int) for _ in range(self.min_available_clients)]
         self.run_id = run_id
+        self.training_time = [0.] * self.min_available_clients
         self.num_classes = num_classes
         self.class_client_matrix_train = class_client_matrix_train
         self.seed = seed
         self.save_path = save_path
         self.warmup_rounds = warmup_rounds
         self.warmup_epochs = warmup_epochs
+        self.out_buf = ''
         self.dataset = dataset
         self.head_switch_down = head_switch_down
         self.head_switch_up = head_switch_up
@@ -218,6 +221,8 @@ class GLow_strategy(Strategy):
                 self.client_list = np.roll(self.client_list, -1).tolist()
         self.client_list = np.roll(self.client_list, -1).tolist()
         self.current_round += 1
+        if self.current_round % self.min_available_clients == 0:
+            self.cur_glob_round += 1
 
     def __repr__(self) -> str:
         rep = f"FedAvg(accept_failures={self.accept_failures})"
@@ -258,12 +263,38 @@ class GLow_strategy(Strategy):
                 self.head_parameters[index] = self.initial_parameters[index]
 
         self.select_head()
+        self.client_list = np.roll(self.client_list, 1).tolist()
         initial_parameters = self.initial_parameters[self.selected_head]
+        self.current_round = -1
+        self.cur_glob_round = -1
         return initial_parameters
 
-    def save_results(self):
+    def save_results(self, server_round):
         """Write <run_id>_heads.out, _result_matrix.out, and per-node
         _parameters/<id>.pth."""
+        if self.current_round < 0: 
+            return
+        self.out_buf += f'head_ID: {str(self.selected_head)} round ID: {self.cur_glob_round} neighbours: {str(self.topology[self.selected_head])} loss: {str(self.head_losses[self.selected_head])} acc: {str(self.head_metrics[self.selected_head])} f1: {str(self.head_f1[self.selected_head])} training_time: {str(self.training_time[self.selected_head])}\n'
+        print(f'round: {self.cur_glob_round} agent ID: {self.selected_head} ({self.current_round%self.min_available_clients})')
+
+
+        param_path = f'{self.save_path}{self.run_id}_parameters/'
+        os.makedirs(param_path, exist_ok=True)
+        net = build_model(self.dataset, self.num_classes)
+        cli_params_ndarrays = parameters_to_ndarrays(self.head_parameters[self.selected_head])
+        params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
+        state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+        net.load_state_dict(state_dict, strict=True)
+        torch.save(net.state_dict(), f'{param_path}r{server_round}_h{self.selected_head}.pth')
+        if server_round == self.total_rounds:
+            self.save_on_finish()
+
+    def save_on_finish(self):
+        """Write <run_id>_heads.out, _result_matrix.out, and per-node
+        _parameters/<id>.pth."""
+        f = open(f"{self.save_path}{self.run_id}_traces.out", "w")
+        f.write(self.out_buf)
+        f.close()
         out = ''
         for cli_ID in range(self.min_available_clients):
             out = out + 'head_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.head_losses[cli_ID]) + ' acc: ' + str(self.head_metrics[cli_ID]) + ' f1: ' +str(self.head_f1[cli_ID]) + '\n'
@@ -332,8 +363,8 @@ class GLow_strategy(Strategy):
                 "among its up neighbours -- every row must list itself."
             )
 
-        if server_round == self.total_rounds:
-            self.save_results()
+        #if server_round == self.total_rounds:
+        self.save_results(server_round)
 
         self.history.add_loss_centralized(server_round=server_round, loss=head_loss)
         self.history.add_metrics_centralized(server_round=server_round, metrics=head_metrics)
@@ -480,6 +511,8 @@ class GLow_strategy(Strategy):
 
         # Only the head's own parameters are updated
         self.head_parameters[self.selected_head] = parameters_aggregated
+
+        self.training_time[self.selected_head] = metrics_aggregated['training_time'][metrics_aggregated['cid'].index(self.selected_head)]
 
         self.history.add_metrics_distributed_fit(server_round=server_round, metrics=metrics_aggregated)
 
