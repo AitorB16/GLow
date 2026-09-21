@@ -10,7 +10,7 @@ GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed s
 
 
 ## Installation and Dependencies
-Built upon Flower 1.30.0 and setuptools v65.0.0 -- using Python 3.10.
+Built upon Flower 1.30.0 and setuptools v84.0.0 -- using Python 3.12.
 The simulator runs CPU-only: the simulated agents represent IoT-class devices, and a single device choice keeps runs reproducible across hosts.
 As the [pyproject.toml](pyproject.toml) file is present, just run:
 ```sh 
@@ -51,9 +51,7 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 
 Example file located in [conf/topologies/graph_8_2/graph_1.yaml](conf/topologies/graph_8_2/graph_1.yaml) following structure:
 - **num_clients:** int; total number of agents
-- **max_num_clients_per_round:** int; max number of clients performing aggregation (i.e., number of neighbors)
 - **clients_with_no_data:** int list (optional); containing the IDs of special nodes with no local instances
-- **last_connected_client:** int; ID of last node connected to the network, nodes with higher IDs will perform SL
 - **heads:**
     - **h0:** int list; containing neighbor IDs
     - **h1:** int list; containing neighbor IDs
@@ -109,6 +107,7 @@ The output of each experiment consists in the following files:
 - **\<run_id>_partitions.out:** Training and test matrices containing number of instances per class per agent
 - **\<run_id>_result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics
 - **\<run_id>_heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
+- **\<run_id>_traces.out:** Training traces per aggregation per agent per communication round --  in a round-robin configuration, the loop of all the agents is considered a round.
 - **\<run_id>_raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *macro_f1*, *Exec_time*
 - **\<run_id>_parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
 

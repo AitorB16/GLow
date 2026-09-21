@@ -8,7 +8,7 @@ import os
 from itertools import chain
 import torchvision.transforms
 import torchvision.datasets as torch_datasets
-
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 def get_cifar10(data_path: str = ".datasets"):
     """Download CIFAR10 and build three dataset views."""
@@ -52,14 +52,58 @@ def get_mnist(data_path: str = ".datasets"):
 
     return trainset, trainset_eval, testset
 
-def _get_dataset(dataset: str):
-    """(trainset, trainset_eval, testset) for `dataset`. Single dispatch point
-    for every prepare_* below."""
+class TON_IOT(torch.utils.data.Dataset):
+    """Tabular dataset over a float32 DataFrame whose LAST column is the label.
+    Mirrors the torchvision datasets the prepare_* partitioners expect: it
+    exposes `.targets` (int class index per item, in __getitem__ order)."""
+
+    def __init__(self, data, indices):
+        indices = np.asarray(indices)
+        arr = data.to_numpy()
+        self.x = torch.from_numpy(np.ascontiguousarray(arr[indices, :-1]))
+        self.targets = arr[indices, -1].astype(np.int64)
+        self.y = torch.from_numpy(self.targets)
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
+
+def get_ton_iot(seed: int, data_path: str = ".datasets/TON_IOT_train_test_datasets/Train_Test_Network_dataset/"):
+
+    df = pd.read_csv(data_path + 'train_test_network.csv')
+    dfr = df.iloc[:,[6,7,8,10,11,12,13,14,16,17,18]].copy()
+    for c in [1,3,4,5,9,15,19,20,21,22,41,43]:
+        le = LabelEncoder()
+        dfr[dfr.shape[1]] = le.fit_transform(df.iloc[:, c].copy())
+
+    dfr = dfr.astype('float32')
+
+    dfr_train = dfr.sample(frac=0.8, random_state=seed)
+    len_dfr_train = len(dfr_train)
+    dfr_test = dfr.drop(dfr_train.index)
+    len_dfr_test = len(dfr_test)
+    feat = dfr_train.columns[:-1]
+    dfr_train[feat] = np.log1p(dfr_train[feat])
+    dfr_test[feat] = np.log1p(dfr_test[feat])
+    scaler = StandardScaler().fit(dfr_train[feat].to_numpy())
+    dfr_train[feat] = scaler.transform(dfr_train[feat].to_numpy()).astype('float32')
+    dfr_test[feat] = scaler.transform(dfr_test[feat].to_numpy()).astype('float32')
+
+    trainset = TON_IOT(dfr_train, np.arange(0, len_dfr_train))
+    testset = TON_IOT(dfr_test, np.arange(0,len_dfr_test))
+
+    return trainset, trainset, testset
+
+def _get_dataset(dataset: str, seed: int):
     if dataset == 'cifar':
         return get_cifar10()
     if dataset == 'mnist':
         return get_mnist()
-    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar' or 'mnist'.")
+    if dataset == 'tiot':
+        return get_ton_iot(seed)
+    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist' or 'tiot'.")
 
 
 def _clients_with_data(num_clients: int, clients_with_no_data: list[int]) -> list[int]:
@@ -123,7 +167,7 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -182,7 +226,7 @@ def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, c
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -248,7 +292,7 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     labels_train = np.array(trainset.targets)
     labels_test = np.array(testset.targets)
     client_indices = [[] for _ in range(num_clients)]
@@ -306,7 +350,7 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     labels_train = np.array(trainset.targets)
     labels_test = np.array(testset.targets)
     client_indices = [[] for _ in range(num_clients)]
@@ -376,7 +420,7 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -447,7 +491,7 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 
@@ -525,7 +569,7 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    trainset, trainset_eval, testset = _get_dataset(dataset)
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
     class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
     class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
 

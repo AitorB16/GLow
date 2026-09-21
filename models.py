@@ -2,12 +2,6 @@
 client.py. Nothing here is FL-specific -- the gossip logic (head/neighbour
 roles, aggregation) lives in custom_strategies/GLow_strategy.py and
 client.py.
-
-Caveat shared by train()/test()/compute_prob_matrix(): when `nature ==
-'malicious'`, the label permutation is applied to validation/test labels too,
-so a malicious client's self-reported metrics look as "good" as a benign
-client's -- the flip corrupts what ground truth means for that client rather
-than degrading its measured performance.
 """
 
 import torch
@@ -70,31 +64,42 @@ class LeNet5(nn.Module):
         x = torch.flatten(x, 1)
         logit = self.classifier(x)
         return logit
+    
+class ScratchNet(nn.Module):
+    def __init__(self, num_classes: int) -> None:
+      super().__init__()
+      self.fc1 = nn.Linear(22, 128)  # 11 numeric + 11 label-encoded features (see get_ton_iot)
+      self.fc2 = nn.Linear(128, 64)
+      self.fc3 = nn.Linear(64, 64)
+      self.dropout = nn.Dropout(p=0.2)
+      self.fc4 = nn.Linear(64, 32)
+      self.fc5 = nn.Linear(32, 32)
+      self.fc6 = nn.Linear(32, num_classes)
+    def forward(self, x):
+      x = F.relu(self.fc1(x))
+      x = F.relu(self.fc2(x))
+      x = F.relu(self.fc3(x))
+      x = self.dropout(x)
+      x = F.relu(self.fc4(x))
+      x = F.relu(self.fc5(x))
+      return self.fc6(x)
 
 def build_model(dataset: str, num_classes: int) -> nn.Module:
-    """Architecture for `dataset`: LeNet (3-channel, CIFAR) or LeNet5
-    (1-channel, MNIST). Single source of truth -- client, server, strategy
-    and the centralized baseline all build models through here."""
+    """Architecture for `dataset`: LeNet (3-channel, CIFAR), LeNet5 (1-channel,
+    MNIST) or ScratchNet (22 tabular features, TON_IoT). Single source of truth
+    -- client, server and strategy all build models through here."""
     if dataset == 'cifar':
         return LeNet(num_classes)
     if dataset == 'mnist':
         return LeNet5(num_classes)
-    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar' or 'mnist'.")
+    if dataset == 'tiot':
+        return ScratchNet(num_classes)
+    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist' or 'tiot'.")
 
 
 def train(net, trainloader, validationloader, optimizer, epochs, num_classes, nature, device):
-    """`epochs` passes over `trainloader`, then one validation pass computing
-    the **centroid**: per-class fraction of validation samples the
-    freshly-trained model predicts correctly (0 if no validation samples for
-    that class) -- the per-class trust signal GLow_strategy's aggregation
-    strategies compare across clients.
-
-    Returns `(train_loss, val_accuracy, centroid)`; `val_accuracy` falls back
-    to `1/num_classes` if `validationloader` is empty (see
-    `clients_with_no_data` in dataset.py).
-    """
     start_event = time.perf_counter()
-    # TRAIN
+    # TRAINING
     criterion = nn.CrossEntropyLoss()
     net.train()
     net.to(device)
@@ -161,14 +166,6 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
     return train_loss, metrics_val_distributed_fit, centroid, training_time
 
 def test(net, testloader, num_classes, nature, device):
-    """Evaluation-only pass over `testloader`: same per-class centroid as
-    train()'s validation step, plus macro-F1. Used both for GLow_strategy's
-    distributed evaluation and, from client.py's fit(), to recompute a
-    neighbour's/head's centroid after local training.
-
-    Falls back to `accuracy=1/num_classes`, `macro_f1=0.` if `testloader` is
-    empty.
-    """
     f1 = torchmetrics.classification.MulticlassF1Score(num_classes=num_classes, average='macro')
 
     criterion = nn.CrossEntropyLoss()

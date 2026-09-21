@@ -1,12 +1,10 @@
 num_clients: 20
-max_num_clients_per_round: 1
 clients_with_no_data:
 - 0
 - 5
 - 10
 - 18
 - 19
-last_connected_client: 15
 heads:
   h0:
   - 0

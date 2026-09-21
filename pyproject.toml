@@ -3,8 +3,8 @@ name = "glow"
 version = "0.1.0"
 description = "GLow - A Flower Based Gossip Learning Strategy"
 readme = "README.md"
-requires-python = "==3.10"
-license = {text = "MIT"}
+requires-python = "==3.12.*"
+license = "MIT"
 authors = [
     {name = "Aitor Belenguer"}
 ]
@@ -18,7 +18,7 @@ dependencies = [
     "scikit-learn==1.7.2",
     "pyyaml==6.0.3",
     "matplotlib==3.10.8",
-    "setuptools==65.0.0",
+    "setuptools==84.0.0",
     "flwr[simulation]==1.30.0",
     "scipy==1.15.3"
 ]
@@ -31,15 +31,15 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools==65.0.0", "wheel"]
+requires = ["setuptools==84.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = [
     "client",
-    "dataset",
+    "datasets",
     "main",
-    "model",
+    "models",
     "server",
 ]
 
@@ -48,7 +48,7 @@ include = ["custom_strategies*", "flwr_lib_modifications*"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [

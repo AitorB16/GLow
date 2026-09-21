@@ -290,8 +290,7 @@ class GLow_strategy(Strategy):
             self.save_on_finish()
 
     def save_on_finish(self):
-        """Write <run_id>_heads.out, _result_matrix.out, and per-node
-        _parameters/<id>.pth."""
+        """Write <run_id>_heads.out, _result_matrix.out"""
         f = open(f"{self.save_path}{self.run_id}_traces.out", "w")
         f.write(self.out_buf)
         f.close()
