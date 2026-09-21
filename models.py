@@ -15,6 +15,7 @@ import torchmetrics
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import time
 
 #CIFAR
 class LeNet(nn.Module):
@@ -92,6 +93,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
     to `1/num_classes` if `validationloader` is empty (see
     `clients_with_no_data` in dataset.py).
     """
+    start_event = time.perf_counter()
     # TRAIN
     criterion = nn.CrossEntropyLoss()
     net.train()
@@ -115,6 +117,8 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
             train_loss.append(loss_sum/len(trainloader))
         else:
             train_loss.append(1./num_classes)
+    end_event = time.perf_counter()
+    training_time = end_event - start_event
 
     # VALIDATION
     correct, total_size, valid_loss = 0, 0, 0.0
@@ -154,7 +158,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
     
     metrics_val_distributed_fit = val_accuracy
 
-    return train_loss, metrics_val_distributed_fit, centroid
+    return train_loss, metrics_val_distributed_fit, centroid, training_time
 
 def test(net, testloader, num_classes, nature, device):
     """Evaluation-only pass over `testloader`: same per-class centroid as

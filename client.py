@@ -82,9 +82,10 @@ class FlowerClient(fl.client.NumPyClient):
         # existing stored parameters (below) and report those, untouched.
         is_head = config['head_cid'] == self.cid
 
+        training_time = 0.
         if is_head:
             optim = torch.optim.Adam(self.model.parameters(), lr=config['lr'])
-            _, metrics_val_distr, centroid = train(
+            _, metrics_val_distr, centroid, training_time = train(
                 self.model, self.trainloader, self.validationloader,
                 optim, epochs, self.num_classes, config['nature'], self.device
             )
@@ -119,6 +120,7 @@ class FlowerClient(fl.client.NumPyClient):
             'centroid': centroid_json,
             'confidence_score': confidence_score_json,
             'prob_matrix': json.dumps(prob_matrix.flatten().tolist()),
+            'training_time': training_time,
             'HEAD': 'YES' if is_head else 'NO',
             'distr_val_loss': '##',
             'energy used': '10W',
@@ -136,7 +138,7 @@ class FlowerClient(fl.client.NumPyClient):
         the accuracy a neighbour reports comes from exactly the code path the
         head uses, on its own validation split -- never the test partition,
         which clients are not given at all."""
-        _, val_accuracy, neighbour_centroid = train(
+        _, val_accuracy, neighbour_centroid, _ = train(
             self.model, self.trainloader, self.validationloader,
             None, 0, self.num_classes, config['nature'], self.device
         )
@@ -193,10 +195,12 @@ def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List
     cids = []
     centroid = []
     prob_matrix = []
+    training_time = []
     for num_examples, m in metrics:
         acc.append(m['acc_val_distr'])
         cids.append(m['cid'])
         centroid.append(m['centroid'])
         prob_matrix.append(m['prob_matrix'])
+        training_time.append(m['training_time'])
     # Aggregate and return custom metric (weighted average)
-    return {"acc_val_distr": acc, "cid": cids, "centroid": centroid, "prob_matrix": prob_matrix}
+    return {"acc_val_distr": acc, "cid": cids, "centroid": centroid, "prob_matrix": prob_matrix, "training_time": training_time}
