@@ -49,7 +49,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.history import History
 
-from flwr_lib_modifications.aggregate import aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, weighted_loss_avg
+from flwr_lib_modifications.aggregate import self_learning, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, weighted_loss_avg
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -285,7 +285,7 @@ class GLow_strategy(Strategy):
         params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
         state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         net.load_state_dict(state_dict, strict=True)
-        torch.save(net.state_dict(), f'{param_path}r{server_round}_h{self.selected_head}.pth')
+        #torch.save(net.state_dict(), f'{param_path}r{server_round}_h{self.selected_head}.pth')
         if server_round == self.total_rounds:
             self.save_on_finish()
 
@@ -484,8 +484,9 @@ class GLow_strategy(Strategy):
         results_by_index = {
             self._cid_to_index[cli.cid]: fit_res for cli, fit_res in results
         }
-
-        if self.aggregation == 'inplace':
+        if self.current_round <= self.warmup_rounds:
+            aggregated_ndarrays = self_learning(results_by_index,up_neighbours, self.selected_head)
+        elif self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results_by_index)
         elif self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head)

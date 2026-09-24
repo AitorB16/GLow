@@ -9,5 +9,5 @@ omegaconf==2.3.0
 matplotlib==3.10.8
 scikit-learn==1.7.2
 flwr[simulation]==1.30.0
-setuptools==65.0.0
+setuptools==84.0.0
 scipy==1.15.3

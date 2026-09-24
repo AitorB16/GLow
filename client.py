@@ -74,7 +74,7 @@ class FlowerClient(fl.client.NumPyClient):
 
         if int(config['comm_round']) <= config['warmup_rounds']:
             epochs = config['warmup_epochs']
-            print(f" -> Client {self.cid}: Warm-up Phase Active! Training for {epochs} epochs.")
+            #print(f" -> Client {self.cid}: Warm-up Phase Active! Training for {epochs} epochs.")
         else:
             epochs = config['local_epochs']
 

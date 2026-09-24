@@ -42,6 +42,15 @@ from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 
 from scipy.spatial.distance import pdist, cdist, squareform, euclidean, cosine
 
+def self_learning(results: Dict[int, FitRes], neighbours: List[int], head_id: int) -> NDArrays:
+    """Self-Learning."""
+    ordered_results = [(n, results[n]) for n in neighbours if n in results]
+    params = []
+    for idx, fit_res in ordered_results:
+        if idx == head_id:
+            params = parameters_to_ndarrays(fit_res.parameters)
+    return params
+
 def aggregate_inplace(results: Dict[int, FitRes]) -> NDArrays:
     """Compute in-place weighted average."""
     fit_results = [results[idx] for idx in sorted(results)]
