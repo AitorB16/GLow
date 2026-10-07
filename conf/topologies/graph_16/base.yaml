@@ -1,0 +1,15 @@
+run_name: 'graph_16'
+dataset: 'mnist' #'cifar', 'mnist', 'tiot'
+aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_2', 'krum'
+split_dataset: 'split_iid_train_common_test' #'split_iid_train_common_test', 'split_niid_train_common_test', 'split_class_niid_train_common_test', 'split_class_niid_train_niid_test', 'split_iid_train_iid_test', 'split_niid_train_iid_test', 'split_niid_train_niid_test'
+device: cpu
+num_rounds: 512
+warmup_rounds: 0
+warmup_epochs: 15
+batch_size: 64
+num_classes: 10 #output layer size
+seed: 1999
+config_fit:
+  lr: 0.0001
+  momentum: 0.9
+  local_epochs: 4

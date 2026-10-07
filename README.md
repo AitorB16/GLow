@@ -34,8 +34,8 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*
 - **topology:** str; path to yaml file containing system topology
 - **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
-- **split_dataset:** str; split dataset among agents, select among *'prepare_dataset_iid_train_common_test'*, *'prepare_dataset_niid_train_common_test'*,*'prepare_dataset_iid_train_iid_test'*, *'prepare_dataset_niid_train_iid_test'*, *'prepare_dataset_niid_train_niid_test'*,
-*'skew_class_niid_train_common_test'*, *'skew_class_niid_train_niid_test'*
+- **split_dataset:** str; split dataset among agents, select among *'split_iid_train_common_test'*, *'split_niid_train_common_test'*,*'split_iid_train_iid_test'*, *'split_niid_train_iid_test'*, *'split_niid_train_niid_test'*,
+*'split_class_niid_train_common_test'*, *'split_class_niid_train_niid_test'*
 - **num_rounds:** int; total number of communication rounds
 - **batch_size:** int; hyperparameter for DataLoader
 - **num_classes:** int; output layer size

@@ -11,6 +11,6 @@ done
 
 #ARGVS: 1st exec name // 2nd conf_file // 3rd runtime_file // 4th root name // 5th number_runs
 #example:
-    #./mult_exp.sh main.py conf/topologies/graph_8_2/base.yaml conf/topologies/graph_8_2/runtime.yaml graph_8_2 4
+    #./mult_exp.sh main.py conf/topologies/graph_8/base.yaml conf/topologies/graph_8/runtime.yaml graph_8 4
 
-#MANUAL RUN EXAMPLE: python3 main.py conf/topologies/graph_8_2/base.yaml conf/topologies/graph_8_2/graph_0.yaml conf/topologies/graph_8_2/runtime.yaml <run_id>
+#MANUAL RUN EXAMPLE: python3 main.py conf/topologies/graph_8/base.yaml conf/topologies/graph_8/graph_0.yaml conf/topologies/graph_8/runtime.yaml <run_id>

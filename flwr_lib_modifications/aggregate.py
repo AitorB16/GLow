@@ -27,7 +27,10 @@ GLow_strategy.aggregate_fit() via `self.aggregation`:
 `results` is `{topology_index: FitRes}` -- built via `_cid_to_index` since
 ClientProxy.cid is an opaque simulation id, not the topology index.
 
-Flower's original generic/Byzantine-robust aggregation rules (Krum, Bulyan,
+- `aggregate_krum` ('krum'): Flower's Krum/MultiKrum, adapted to take
+  `{topology_index: FitRes}`.
+
+Flower's other generic/Byzantine-robust aggregation rules (Bulyan,
 trimmed-mean, Q-FFL, plain median/weighted-average) are kept below the GLow
 ones -- none of them are wired into this dispatch.
 """
@@ -296,12 +299,17 @@ def aggregate_median(results: List[Tuple[NDArrays, int]]) -> NDArrays:
 
 
 def aggregate_krum(
-    results: List[Tuple[NDArrays, int]], num_malicious: int, to_keep: int
+    results: Dict[int, FitRes], num_malicious: int, to_keep: int
 ) -> NDArrays:
     """Choose one parameter vector according to the Krum function.
 
-    If to_keep is not None, then MultiKrum is applied.
+    If to_keep > 0, then MultiKrum is applied.
     """
+    results = [
+        (parameters_to_ndarrays(results[idx].parameters), results[idx].num_examples)
+        for idx in sorted(results)
+    ]
+
     # Create a list of weights and ignore the number of examples
     weights = [weights for weights, _ in results]
 

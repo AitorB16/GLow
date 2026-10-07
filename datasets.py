@@ -54,7 +54,7 @@ def get_mnist(data_path: str = ".datasets"):
 
 class TON_IOT(torch.utils.data.Dataset):
     """Tabular dataset over a float32 DataFrame whose LAST column is the label.
-    Mirrors the torchvision datasets the prepare_* partitioners expect: it
+    Mirrors the torchvision datasets the split_* partitioners expect: it
     exposes `.targets` (int class index per item, in __getitem__ order)."""
 
     def __init__(self, data, indices):
@@ -161,7 +161,7 @@ def _client_test_loader(indices, testset, batch_size, seed):
         generator=torch.Generator().manual_seed(seed),
     )
 
-def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
+def split_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
     """IID training data (equal-sized random splits) plus one shared test set
     identical for every client."""
     np.random.seed(seed=seed)
@@ -173,12 +173,10 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
 
     clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
-    # SPLIT DATASET BY CLASSES
     labels_train = np.array(trainset.targets)
-    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
-    num_images = len(ordered_train_idx) // len(clients_with_data)
-    num_images_remainder = len(ordered_train_idx) % len(clients_with_data)
+    num_images = len(trainset) // len(clients_with_data)
+    num_images_remainder = len(trainset) % len(clients_with_data)
 
     partition_len_train = [0] * num_clients
 
@@ -190,7 +188,7 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
             num_images_remainder -=1
 
     ##########
-    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+    client_train_indices = _partition_indices(np.arange(len(trainset)), partition_len_train, seed)
 
     trainloaders = []
     validationloaders = []
@@ -207,9 +205,8 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
 
     #TEST SET
     labels_test = np.array(testset.targets)
-    ordered_test_idx = np.concatenate([np.where(labels_test == i)[0] for i in range(num_classes)])
 
-    testloader = _client_test_loader(ordered_test_idx, testset, batch_size, seed)
+    testloader = _client_test_loader(np.arange(len(testset)), testset, batch_size, seed)
     testloaders = [testloader] * num_clients
 
     test_counts = np.bincount(labels_test, minlength=num_classes)
@@ -218,71 +215,7 @@ def prepare_dataset_iid_train_common_test(num_clients: int, num_classes: int, cl
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
-def prepare_dataset_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
-    """"Coarse" Dirichlet-skewed training data: one Dirichlet draw (fixed
-    8-length `alpha`, i.e. sized for an 8-client topology) sizes a contiguous
-    slice of the class-sorted train set per client. Test set is shared for
-    every client."""
-    np.random.seed(seed=seed)
-    torch.manual_seed(seed)
-
-    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
-    class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
-    class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
-
-    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
-
-    # SPLIT DATASET BY CLASSES
-    labels_train = np.array(trainset.targets)
-    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
-
-    # SPLIT DIRICHLET DISTRIBUTION
-    alpha = [20., 1., 1., 2., 2., 1., 1., 20. ]
-    dirich = np.random.dirichlet(alpha)
-
-    partition_len_train = [0] * num_clients
-    total_instances = 0
-    j = 0
-
-    #SPLIT DS ACCORDINGLY
-    for i in clients_with_data:
-        partition_len_train[i] = int(len(ordered_train_idx)*dirich[j])
-        total_instances += partition_len_train[i]
-        j+=1
-
-    remainder = len(ordered_train_idx) - total_instances
-    partition_len_train[clients_with_data[0]] += remainder
-
-    ##########
-    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
-
-    trainloaders = []
-    validationloaders = []
-
-    for client_id in range(num_clients):
-        trainloader, valloader = _client_train_val_loaders(
-            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
-        )
-        trainloaders.append(trainloader)
-        validationloaders.append(valloader)
-        class_client_matrix_train[client_id] = np.bincount(
-            labels_train[client_train_indices[client_id]], minlength=num_classes
-        )
-
-    #TEST SET
-    labels_test = np.array(testset.targets)
-    ordered_test_idx = np.concatenate([np.where(labels_test == i)[0] for i in range(num_classes)])
-
-    testloader = _client_test_loader(ordered_test_idx, testset, batch_size, seed)
-    testloaders = [testloader] * num_clients
-
-    test_counts = np.bincount(labels_test, minlength=num_classes)
-    for client_id in range(num_clients):
-        class_client_matrix_test[client_id] = test_counts
-
-    return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
-
-def skew_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+def split_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
     """"Fine" per-class Dirichlet skew (`alpha<0.1`, strongly skewed): each
     class is independently Dirichlet-split across `clients_with_data`, giving
     direct per-client per-class control -- the standard FL class-skew
@@ -339,8 +272,8 @@ def skew_class_niid_train_common_test(num_clients: int, num_classes: int, client
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
-    """Same per-class Dirichlet skew as `skew_class_niid_train_common_test`,
+def split_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+    """Same per-class Dirichlet skew as `split_class_niid_train_common_test`,
     but the same per-class proportions (`dirichlet_props`, drawn once from
     the train split) are reapplied to independently partition the test set --
     each client's test set mirrors its own train set's class distribution
@@ -414,7 +347,7 @@ def skew_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
+def split_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
     """IID training data plus an independently IID-partitioned test set,
     split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
@@ -426,12 +359,10 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
 
     clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
-    # SPLIT DATASET BY CLASSES
     labels_train = np.array(trainset.targets)
-    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
-    num_images = len(ordered_train_idx) // len(clients_with_data)
-    num_images_remainder = len(ordered_train_idx) % len(clients_with_data)
+    num_images = len(trainset) // len(clients_with_data)
+    num_images_remainder = len(trainset) % len(clients_with_data)
 
     partition_len_train = [0] * num_clients
 
@@ -443,7 +374,7 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
             num_images_remainder -=1
 
     ##########
-    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+    client_train_indices = _partition_indices(np.arange(len(trainset)), partition_len_train, seed)
 
     trainloaders = []
     validationloaders = []
@@ -485,7 +416,66 @@ def prepare_dataset_iid_train_iid_test(num_clients: int, num_classes: int, clien
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
+def split_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+    """"Coarse" Dirichlet-skewed training data. Test set is shared for
+    every client."""
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
+    class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
+    class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
+
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
+
+    labels_train = np.array(trainset.targets)
+
+    # SPLIT DIRICHLET DISTRIBUTION
+    #alpha = [20., 1., 1., 2., 2., 1., 1., 20. ]
+    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
+    dirich = np.random.dirichlet(alpha)
+
+    partition_len_train = [0] * num_clients
+    total_instances = 0
+    j = 0
+
+    #SPLIT DS ACCORDINGLY
+    for i in clients_with_data:
+        partition_len_train[i] = int(len(trainset)*dirich[j])
+        total_instances += partition_len_train[i]
+        j+=1
+
+    remainder = len(trainset) - total_instances
+    partition_len_train[clients_with_data[0]] += remainder
+
+    ##########
+    client_train_indices = _partition_indices(np.arange(len(trainset)), partition_len_train, seed)
+
+    trainloaders = []
+    validationloaders = []
+
+    for client_id in range(num_clients):
+        trainloader, valloader = _client_train_val_loaders(
+            client_train_indices[client_id], trainset, trainset_eval, val_ratio, batch_size, seed
+        )
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        class_client_matrix_train[client_id] = np.bincount(
+            labels_train[client_train_indices[client_id]], minlength=num_classes
+        )
+
+    #TEST SET
+    labels_test = np.array(testset.targets)
+    testloader = _client_test_loader(np.arange(len(testset)), testset, batch_size, seed)
+    testloaders = [testloader] * num_clients
+
+    test_counts = np.bincount(labels_test, minlength=num_classes)
+    for client_id in range(num_clients):
+        class_client_matrix_test[client_id] = test_counts
+
+    return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
+
+def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data plus an independently IID-partitioned
     test set split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
@@ -497,9 +487,7 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
 
     clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
-    # SPLIT DATASET BY CLASSES
     labels_train = np.array(trainset.targets)
-    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
     # SPLIT DIRICHLET DISTRIBUTION
     alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
@@ -511,15 +499,15 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
 
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_train[i] = int(len(ordered_train_idx)*dirich[j])
+        partition_len_train[i] = int(len(trainset)*dirich[j])
         total_instances += partition_len_train[i]
         j+=1
 
-    remainder = len(ordered_train_idx) - total_instances
+    remainder = len(trainset) - total_instances
     partition_len_train[clients_with_data[0]] += remainder
 
     ##########
-    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+    client_train_indices = _partition_indices(np.arange(len(trainset)), partition_len_train, seed)
 
     trainloaders = []
     validationloaders = []
@@ -561,10 +549,10 @@ def prepare_dataset_niid_train_iid_test(num_clients: int, num_classes: int, clie
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data plus
     a test set skewed the same way: the identical `dirich` proportions drawn
-    for the train split slice the independent, class-sorted test set into
+    for the train split slice the shuffled test set into
     per-client chunks."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
@@ -575,9 +563,7 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
 
     clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
 
-    # SPLIT DATASET BY CLASSES
     labels_train = np.array(trainset.targets)
-    ordered_train_idx = np.concatenate([np.where(labels_train == i)[0] for i in range(num_classes)])
 
     # SPLIT DIRICHLET DISTRIBUTION
     alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
@@ -589,15 +575,15 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
 
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_train[i] = int(len(ordered_train_idx)*dirich[j])
+        partition_len_train[i] = int(len(trainset)*dirich[j])
         total_instances += partition_len_train[i]
         j+=1
 
-    remainder = len(ordered_train_idx) - total_instances
+    remainder = len(trainset) - total_instances
     partition_len_train[clients_with_data[0]] += remainder
 
     ##########
-    client_train_indices = _partition_indices(ordered_train_idx, partition_len_train, seed)
+    client_train_indices = _partition_indices(np.arange(len(trainset)), partition_len_train, seed)
 
     trainloaders = []
     validationloaders = []
@@ -614,7 +600,6 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
 
     #TEST SET
     labels_test = np.array(testset.targets)
-    ordered_test_idx = np.concatenate([np.where(labels_test == i)[0] for i in range(num_classes)])
 
     partition_len_test = [0] * num_clients
     total_instances = 0
@@ -622,14 +607,14 @@ def prepare_dataset_niid_train_niid_test(num_clients: int, num_classes: int, cli
 
     #SPLIT DS ACCORDINGLY
     for i in clients_with_data:
-        partition_len_test[i] = int(len(ordered_test_idx)*dirich[j])
+        partition_len_test[i] = int(len(testset)*dirich[j])
         total_instances += partition_len_test[i]
         j+=1
-    remainder = len(ordered_test_idx) - total_instances
+    remainder = len(testset) - total_instances
     partition_len_test[clients_with_data[0]] += remainder
 
     ##########
-    client_test_indices = _partition_indices(ordered_test_idx, partition_len_test, seed)
+    client_test_indices = _partition_indices(np.arange(len(testset)), partition_len_test, seed)
     testloaders = []
 
     for client_id in range(num_clients):

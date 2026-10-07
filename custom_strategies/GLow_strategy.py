@@ -49,7 +49,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.history import History
 
-from flwr_lib_modifications.aggregate import self_learning, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, weighted_loss_avg
+from flwr_lib_modifications.aggregate import self_learning, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, weighted_loss_avg, aggregate_krum
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -488,6 +488,8 @@ class GLow_strategy(Strategy):
             aggregated_ndarrays = self_learning(results_by_index,up_neighbours, self.selected_head)
         elif self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results_by_index)
+        elif self.aggregation == 'krum':
+            aggregated_ndarrays = aggregate_krum(results_by_index, 0, 0)
         elif self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head)
         elif self.aggregation == 'score_validation':

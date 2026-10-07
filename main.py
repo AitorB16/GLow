@@ -15,7 +15,7 @@ import numpy as np
 
 import yaml
 
-from datasets import prepare_dataset_iid_train_common_test, prepare_dataset_niid_train_common_test, skew_class_niid_train_common_test, skew_class_niid_train_niid_test, prepare_dataset_iid_train_iid_test, prepare_dataset_niid_train_niid_test, prepare_dataset_niid_train_iid_test
+from datasets import split_iid_train_common_test, split_niid_train_common_test, split_class_niid_train_common_test, split_class_niid_train_niid_test, split_iid_train_iid_test, split_niid_train_iid_test, split_niid_train_niid_test
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average,
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -100,27 +100,27 @@ def main():
         head_nature.append(client_runtime['nature'])
     
     # 2. PREAPRE YOUR DATASET
-    if cfg['split_dataset'] == 'prepare_dataset_iid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
-    elif cfg['split_dataset'] == 'prepare_dataset_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
-    elif cfg['split_dataset'] == 'skew_class_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
-    elif cfg['split_dataset'] == 'skew_class_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = skew_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
-    elif cfg['split_dataset'] == 'prepare_dataset_iid_train_iid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
-    elif cfg['split_dataset'] == 'prepare_dataset_niid_train_iid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
-    elif cfg['split_dataset'] == 'prepare_dataset_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = prepare_dataset_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    if cfg['split_dataset'] == 'split_iid_train_common_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'split_niid_train_common_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'split_class_niid_train_common_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = split_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'split_class_niid_train_niid_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = split_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'split_iid_train_iid_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'split_niid_train_iid_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+    elif cfg['split_dataset'] == 'split_niid_train_niid_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     else:
         raise ValueError(
             f"Unknown split_dataset '{cfg['split_dataset']}'. Expected one of: "
-            "'prepare_dataset_iid_train_common_test', 'prepare_dataset_niid_train_common_test', "
-            "'skew_class_niid_train_common_test', 'skew_class_niid_train_niid_test', "
-            "'prepare_dataset_iid_train_iid_test', 'prepare_dataset_niid_train_iid_test', "
-            "'prepare_dataset_niid_train_niid_test'."
+            "'split_iid_train_common_test', 'split_niid_train_common_test', "
+            "'split_class_niid_train_common_test', 'split_class_niid_train_niid_test', "
+            "'split_iid_train_iid_test', 'split_niid_train_iid_test', "
+            "'split_niid_train_niid_test'."
         )
 
     # 3. DEFINE YOUR CLIENTS
