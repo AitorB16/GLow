@@ -3,60 +3,70 @@ heads:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h1:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
 
   h2:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h3:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h4:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h5:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h6:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h7:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h8:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty
   h9:
     down:
     up:
     malicious:
+    random:
     status: up #up, down
-    nature: OK #OK, malicious, empty
+    nature: OK #OK, malicious, random, empty

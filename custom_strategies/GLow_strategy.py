@@ -22,6 +22,7 @@ going up/down/malicious per round.
 
 import os
 import json
+import time
 import flwr
 import numpy as np
 from collections import OrderedDict
@@ -102,6 +103,7 @@ class GLow_strategy(Strategy):
         head_switch_down: List[List[int]],
         head_switch_up: List[List[int]],
         head_switch_malicious: List[List[int]],
+        head_switch_random: List[List[int]],
         head_status: List[str],
         head_nature: List[str],
         seed: int,
@@ -155,6 +157,7 @@ class GLow_strategy(Strategy):
         self.head_switch_down = head_switch_down
         self.head_switch_up = head_switch_up
         self.head_switch_malicious = head_switch_malicious
+        self.head_switch_random = head_switch_random
         self.head_status = head_status
         self.head_nature = head_nature
         # ClientProxy.cid -> topology index; simulation ID maps to client ID
@@ -189,7 +192,7 @@ class GLow_strategy(Strategy):
         return up_neighbors
 
     def head_check(self):
-        """Apply this round's scheduled up/down/malicious transitions."""
+        """Apply this round's scheduled up/down/malicious/random transitions."""
         for agent in self.client_list:
             if self.head_switch_up[agent] is not None:
                 if self.current_round in self.head_switch_up[agent]:
@@ -199,14 +202,22 @@ class GLow_strategy(Strategy):
                     self.head_status[agent] = 'down'
             if self.head_switch_malicious[agent] is not None:
                 if self.current_round in self.head_switch_malicious[agent]:
-                    self.head_nature[agent] = 'malicious'
-                    self.topology[agent] = [agent]
-                    self.head_metrics[agent] = None
-                    self.head_losses[agent] = None
-                    self.head_f1[agent] = None
-                    self.head_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
-                    self.neigh_metrics[agent] = [None] * self.min_available_clients
-                    self.head_parameters[agent] = self.initial_parameters[agent]
+                    self.turn_bad(agent, 'malicious')
+            if self.head_switch_random[agent] is not None:
+                if self.current_round in self.head_switch_random[agent]:
+                    self.turn_bad(agent, 'random')
+
+    def turn_bad(self, agent, nature):
+        """Make `agent` a 'malicious' or 'random' node (label noise in
+        models.corrupt_labels): isolate it and restart it from scratch."""
+        self.head_nature[agent] = nature
+        self.topology[agent] = [agent]
+        self.head_metrics[agent] = None
+        self.head_losses[agent] = None
+        self.head_f1[agent] = None
+        self.head_preds_per_class[agent] = np.zeros((self.num_classes, self.num_classes),dtype=int)
+        self.neigh_metrics[agent] = [None] * self.min_available_clients
+        self.head_parameters[agent] = self.initial_parameters[agent]
 
     def select_head(self):
         """Rotate to this round's head (first online node in client_list)
@@ -267,6 +278,7 @@ class GLow_strategy(Strategy):
         initial_parameters = self.initial_parameters[self.selected_head]
         self.current_round = -1
         self.cur_glob_round = -1
+        self._t0 = time.time()  # for the progress line's ETA
         return initial_parameters
 
     def save_results(self, server_round):
@@ -275,7 +287,15 @@ class GLow_strategy(Strategy):
         if self.current_round < 0: 
             return
         self.out_buf += f'head_ID: {str(self.selected_head)} round ID: {self.cur_glob_round} neighbours: {str(self.topology[self.selected_head])} loss: {str(self.head_losses[self.selected_head])} acc: {str(self.head_metrics[self.selected_head])} f1: {str(self.head_f1[self.selected_head])} training_time: {str(self.training_time[self.selected_head])}\n'
-        print(f'round: {self.cur_glob_round} agent ID: {self.selected_head} ({self.current_round%self.min_available_clients})')
+        # Progress line, parsed by dashboard/server.py: keep "round N/T" and "ETA".
+        head = self.selected_head
+        elapsed = time.time() - self._t0
+        eta = elapsed / server_round * (self.total_rounds - server_round)
+        num = lambda v: '-' if v is None else f'{v:.3f}'
+        print(f'round {server_round}/{self.total_rounds}  glob {self.cur_glob_round}  head {head}  '
+              f'loss {num(self.head_losses[head])}  acc {num(self.head_metrics[head])}  '
+              f'f1 {num(self.head_f1[head])}  train {self.training_time[head]:.1f}s  '
+              f'elapsed {elapsed/60:.1f} min  ETA {eta/60:.1f} min', flush=True)
 
 
         param_path = f'{self.save_path}{self.run_id}_parameters/'
@@ -322,7 +342,6 @@ class GLow_strategy(Strategy):
     ) -> Optional[Tuple[float, Dict[str, Scalar]]]:
         """Re-evaluate this round's up-neighbours; return the head's own
         (loss, metrics)."""
-
         if self.evaluate_fn is None:
             return None
 
@@ -489,7 +508,7 @@ class GLow_strategy(Strategy):
         elif self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results_by_index)
         elif self.aggregation == 'krum':
-            aggregated_ndarrays = aggregate_krum(results_by_index, 0, 0)
+            aggregated_ndarrays = aggregate_krum(results_by_index, 1, 2)
         elif self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head)
         elif self.aggregation == 'score_validation':

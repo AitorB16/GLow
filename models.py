@@ -97,6 +97,19 @@ def build_model(dataset: str, num_classes: int) -> nn.Module:
     raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist' or 'tiot'.")
 
 
+def corrupt_labels(labels, nature, num_classes):
+    """Label noise by agent nature: 'malicious' shifts every class by one
+    (0->1, ..., 9->0); 'random' maps each class to a random one, redrawn per
+    batch; any other nature leaves labels untouched."""
+    if nature == 'malicious':
+        mapping = torch.roll(torch.arange(num_classes), -1)
+    elif nature == 'random':
+        mapping = torch.tensor(np.random.randint(num_classes, size=num_classes))
+    else:
+        return labels
+    return mapping[labels]
+
+
 def train(net, trainloader, validationloader, optimizer, epochs, num_classes, nature, device):
     start_event = time.perf_counter()
     # TRAINING
@@ -107,10 +120,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
     for _ in range(epochs):
         loss_sum = 0.
         for inputs, labels in trainloader: #INPUTS ARE TUPLES OF DATABASE
-            if nature == 'malicious': #FLIP LABEL
-                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
-                #mapping = torch.tensor(np.random.randint(10, size=10))
-                labels = mapping[labels]
+            labels = corrupt_labels(labels, nature, num_classes)
             inputs, labels = inputs.to(device), labels.to(device)
             loss = criterion(net(inputs), labels)
             loss.backward()
@@ -132,10 +142,7 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
 
     net.eval()     # Optional when not using Model Specific layer
     for inputs, labels in validationloader:
-        if nature == 'malicious': #FLIP LABEL
-                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
-                #mapping = torch.tensor(np.random.randint(10, size=10))
-                labels = mapping[labels]
+        labels = corrupt_labels(labels, nature, num_classes)
         
         for c in range(num_classes):
             instances_per_class[c]+= (labels == c).sum()
@@ -177,10 +184,7 @@ def test(net, testloader, num_classes, nature, device):
     net.to(device)
     with torch.no_grad():
         for inputs, labels in testloader:
-            if nature == 'malicious': #FLIP LABEL
-                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])  # old → new
-                #mapping = torch.tensor(np.random.randint(10, size=10))
-                labels = mapping[labels]
+            labels = corrupt_labels(labels, nature, num_classes)
 
             for c in range(num_classes):
                 instances_per_class[c]+= (labels == c).sum()
@@ -226,9 +230,7 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
 
     with torch.no_grad():
         for inputs, labels in testloader:
-            if nature == 'malicious':  # FLIP LABEL
-                mapping = torch.tensor([1,2,3,4,5,6,7,8,9,0])
-                labels = mapping[labels]
+            labels = corrupt_labels(labels, nature, num_classes)
 
             outputs = net(inputs.to(device))
             probs = F.softmax(outputs, dim=1).cpu()

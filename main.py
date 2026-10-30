@@ -31,6 +31,11 @@ from custom_strategies.GLow_strategy import GLow_strategy
 logging.getLogger("flwr").setLevel(logging.WARNING)
 
 
+def as_list(v):
+    """Runtime switch -> list of rounds; None (empty field) stays None."""
+    return v if v is None or isinstance(v, list) else [v]
+
+
 def slurm_ray_init_args():
     """Ray sizes its object store and actor pool from the whole node, not from
     the SLURM cgroup -- under sbatch it oversubscribes the allocation by orders
@@ -91,11 +96,13 @@ def main():
     head_status = []
     head_nature = []
     head_switch_malicious = []
+    head_switch_random = []
     for i in range(num_clients):
         client_runtime = runtime['heads']['h'+str(i)]
-        head_switch_down.append(client_runtime['down'])
-        head_switch_up.append(client_runtime['up'])
-        head_switch_malicious.append(client_runtime['malicious'])
+        head_switch_down.append(as_list(client_runtime['down']))
+        head_switch_up.append(as_list(client_runtime['up']))
+        head_switch_malicious.append(as_list(client_runtime['malicious']))
+        head_switch_random.append(as_list(client_runtime.get('random')))  # older runtime files lack it
         head_status.append(client_runtime['status'])
         head_nature.append(client_runtime['nature'])
     
@@ -103,17 +110,17 @@ def main():
     if cfg['split_dataset'] == 'split_iid_train_common_test':
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'split_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
     elif cfg['split_dataset'] == 'split_class_niid_train_common_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = split_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = split_class_niid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
     elif cfg['split_dataset'] == 'split_class_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = split_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test  = split_class_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
     elif cfg['split_dataset'] == 'split_iid_train_iid_test':
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_iid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'split_niid_train_iid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
     elif cfg['split_dataset'] == 'split_niid_train_niid_test':
-        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
     else:
         raise ValueError(
             f"Unknown split_dataset '{cfg['split_dataset']}'. Expected one of: "
@@ -145,6 +152,7 @@ def main():
         head_switch_down=head_switch_down,
         head_switch_up=head_switch_up,
         head_switch_malicious=head_switch_malicious,
+        head_switch_random=head_switch_random,
         head_status=head_status,
         head_nature=head_nature,
         seed = cfg['seed'],

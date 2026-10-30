@@ -215,13 +215,12 @@ def split_iid_train_common_test(num_clients: int, num_classes: int, clients_with
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
-def split_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+def split_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: float, val_ratio: float = 0.1):
     """"Fine" per-class Dirichlet skew (`alpha<0.1`, strongly skewed): each
     class is independently Dirichlet-split across `clients_with_data`, giving
     direct per-client per-class control -- the standard FL class-skew
     partitioning. Test set is shared for every client."""
 
-    alpha = 0.1
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -272,14 +271,13 @@ def split_class_niid_train_common_test(num_clients: int, num_classes: int, clien
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def split_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+def split_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: float, val_ratio: float = 0.1):
     """Same per-class Dirichlet skew as `split_class_niid_train_common_test`,
     but the same per-class proportions (`dirichlet_props`, drawn once from
     the train split) are reapplied to independently partition the test set --
     each client's test set mirrors its own train set's class distribution
     without sharing samples with anyone else."""
 
-    alpha = 0.1
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -416,7 +414,7 @@ def split_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def split_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+def split_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: list[float], val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data. Test set is shared for
     every client."""
     np.random.seed(seed=seed)
@@ -431,8 +429,6 @@ def split_niid_train_common_test(num_clients: int, num_classes: int, clients_wit
     labels_train = np.array(trainset.targets)
 
     # SPLIT DIRICHLET DISTRIBUTION
-    #alpha = [20., 1., 1., 2., 2., 1., 1., 20. ]
-    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
     dirich = np.random.dirichlet(alpha)
 
     partition_len_train = [0] * num_clients
@@ -475,7 +471,7 @@ def split_niid_train_common_test(num_clients: int, num_classes: int, clients_wit
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
-def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
+def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: list[float], val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data plus an independently IID-partitioned
     test set split evenly across all `num_clients`."""
     np.random.seed(seed=seed)
@@ -490,7 +486,6 @@ def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_n
     labels_train = np.array(trainset.targets)
 
     # SPLIT DIRICHLET DISTRIBUTION
-    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
     dirich = np.random.dirichlet(alpha)
 
     partition_len_train = [0] * num_clients
@@ -549,7 +544,7 @@ def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_n
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 
-def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str,  val_ratio: float = 0.1):
+def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: list[float], val_ratio: float = 0.1):
     """"Coarse" Dirichlet-skewed training data plus
     a test set skewed the same way: the identical `dirich` proportions drawn
     for the train split slice the shuffled test set into
@@ -566,7 +561,6 @@ def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_
     labels_train = np.array(trainset.targets)
 
     # SPLIT DIRICHLET DISTRIBUTION
-    alpha = [20., 40., 1., 1., 1., 1., 1., 2., 2., 1., 1., 1., 1., 1., 40., 20. ]
     dirich = np.random.dirichlet(alpha)
 
     partition_len_train = [0] * num_clients

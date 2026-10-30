@@ -2,9 +2,10 @@ run_name: 'graph_16'
 dataset: 'mnist' #'cifar', 'mnist', 'tiot'
 aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_2', 'krum'
 split_dataset: 'split_iid_train_common_test' #'split_iid_train_common_test', 'split_niid_train_common_test', 'split_class_niid_train_common_test', 'split_class_niid_train_niid_test', 'split_iid_train_iid_test', 'split_niid_train_iid_test', 'split_niid_train_niid_test'
+alpha: 0.1 #Dirichlet: float for split_class_niid_*, one float per client for split_niid_*; unused by split_iid_*
 device: cpu
 num_rounds: 512
-warmup_rounds: 0
+warmup_rounds: 16
 warmup_epochs: 15
 batch_size: 64
 num_classes: 10 #output layer size

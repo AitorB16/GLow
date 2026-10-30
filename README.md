@@ -1,5 +1,5 @@
 # GLow - A Flower Based GL Strategy
-GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed systems using the **Flower Framework**. The implementation is able to simulate a fully decentraliced network composed by virtual network agents (disposed in different toplogies) that perform parameter aggregation with their neighbors. Modularity is an essential part of the system making the usage of different datasets, models and run configurations easy to integrate. Although the [Flower Framework](https://flower.ai/docs/framework/how-to-implement-strategies.html) guidelines for strategy implementation are followed, GLow differs from a centralized FL scheme -- there is no aggregation server and each agent operates as client and server at the same time (P2P). Further explanations of the strategy are found in [GLow - A Novel, Flower-Based Simulated Gossip Learning Strategy](https://www.sciencedirect.com/science/article/pii/S074373152600050X?via%3Dihub) manuscript. Moreover, custom decentralized aggregation algorithms *ScoreAVG* and dynamic run time behavior customization are implemented -- nodes can go up/down or malicious (model poisoning) during simulation execution.
+GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed systems using the **Flower Framework**. The implementation is able to simulate a fully decentraliced network composed by virtual network agents (disposed in different toplogies) that perform parameter aggregation with their neighbors. Modularity is an essential part of the system making the usage of different datasets, models and run configurations easy to integrate. Although the [Flower Framework](https://flower.ai/docs/framework/how-to-implement-strategies.html) guidelines for strategy implementation are followed, GLow differs from a centralized FL scheme -- there is no aggregation server and each agent operates as client and server at the same time (P2P). Further explanations of the strategy are found in [GLow - A Novel, Flower-Based Simulated Gossip Learning Strategy](https://www.sciencedirect.com/science/article/pii/S074373152600050X?via%3Dihub) manuscript. Moreover, custom decentralized aggregation algorithms and dynamic run time behavior customization are implemented -- nodes can go up/down, malicious (labels shifted by one) or random (random labels) during simulation execution.
 
 ## Directory structure
 - **conf (configuration files)**: YAML configuration files
@@ -21,6 +21,8 @@ uv sync
 ## Dataset
 The implementation works with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) and [MNIST](https://pytorch.org/vision/main/generated/torchvision.datasets.MNIST.html), selected with the **dataset** key. Both are downloaded on first run into the [.datasets](./.datasets) directory.
 
+>Note: TON_IoT (*'tiot'*) is read from *.datasets/TON_IOT_train_test_datasets/Train_Test_Network_dataset/train_test_network.csv*, which has to be placed manually.
+
 ## Configuration files
 
 Configuration files in GLow are composed by a base file and a topology file.
@@ -30,12 +32,13 @@ Configuration files in GLow are composed by a base file and a topology file.
 
 Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
-- **dataset:** str; dataset and its model, select among *'cifar'*, *'mnist'*
-- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach'*
+- **dataset:** str; dataset and its model, select among *'cifar'*, *'mnist'*, *'tiot'*
+- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*, *'krum'*
 - **topology:** str; path to yaml file containing system topology
-- **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious...)
+- **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious/random...)
 - **split_dataset:** str; split dataset among agents, select among *'split_iid_train_common_test'*, *'split_niid_train_common_test'*,*'split_iid_train_iid_test'*, *'split_niid_train_iid_test'*, *'split_niid_train_niid_test'*,
 *'split_class_niid_train_common_test'*, *'split_class_niid_train_niid_test'*
+- **alpha:** Dirichlet parameter; float for *'split_class_niid_\*'*, float list (one per agent) for *'split_niid_\*'*, ignored by *'split_iid_\*'*
 - **num_rounds:** int; total number of communication rounds
 - **batch_size:** int; hyperparameter for DataLoader
 - **num_classes:** int; output layer size
@@ -77,6 +80,8 @@ Example:
 ```
 > Note: Topology ID is an integer corresponding to the interconnection degree.
 
+> Note: Deployment script [sing_exp.sh](/sing_exp.sh) has to be configured for Python or Slurm usage.
+
 ### Multiple runs (with arguments)
 
 For experiments that involve multiple graphs; e.g., adding edges to an specific number of agents. Deployment is thought to be done using [mult_exp.sh](./mult_exp.sh) script, with topologies generated by [generate_topology.ipynb](./generate_topology.ipynb) and placed in [conf/topologies](./conf/topologies/) directory. Example [graph_8](./conf/topologies/graph_8/), contains 5 topologies with the same number of nodes and configurations, going from fully disconnected to fully connected graphs.
@@ -117,17 +122,20 @@ This section is oriented for visualization of the results obtained from *multipl
 
 - **8_visualize_results:** Visualize GLow experiments for an 8 agent scenario
 - **16_visualize_results:** Visualize GLow experiments for an 16 agent scenario
-- **FL_visualize_results:** Visualize FL experiments
 - **draw_graphs:** Draws graphs from YAML files generated with [generate_topology.ipynb](./generate_topology.ipynb)
 
 ## Changes in libraries
 
 Dealing with control nodes with no local data is not a Flower feature. Performing weighted average among network parameters triggers scaling factors realted issues (division by 0). Hence, *aggregate_inplace()*  method of [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py) is modified. Scaling factor for nodes with no local data is set to 1.0 -- no scaling factor applied.
+
 Implementation of additional aggregation methods [flwr/server/strategy/aggregate.py](/flwr_lib_modifications/aggregate.py): *self_learning()*, *aggregate_inplace()*, *aggregate_score()*, *aggregate_score_validation()*, *aggregate_krum()*, *aggregate_score_centroids_2()*.
 
-Ray sizes its actor pool and object store from the whole node rather than from a SLURM allocation, which oversubscribes the job's memory. `main.py`'s `slurm_ray_init_args()` derives the real limits from `SLURM_CPUS_PER_TASK`/`SLURM_MEM_PER_CPU` and passes them to Ray via `backend_config['init_args']`. Set `GLOW_RAY_TMP` (short absolute path, e.g. `/scratch/$USER/ray`) to keep Ray's session directory off `/tmp`, and cap `OMP_NUM_THREADS` to match `client_resources`' `num_cpus`.
+Ray sizes its actor pool and object store from the whole node rather than from a SLURM allocation, which oversubscribes the job's memory. `main.py`'s `slurm_ray_init_args()` derives the real limits from `SLURM_CPUS_PER_TASK`/`SLURM_MEM_PER_CPU` and passes them to Ray via `backend_config['init_args']`. 
+
+> Note: Optionally set `GLOW_RAY_TMP` (short absolute path, writable from where Python runs) to move Ray's session directory off `/tmp`, and cap `OMP_NUM_THREADS` to match `client_resources`' `num_cpus`.
 
 > Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py).
+
 
 ## Authors
 
