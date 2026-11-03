@@ -21,6 +21,7 @@ going up/down/malicious per round.
 """
 
 import os
+import time
 import json
 import time
 import flwr
@@ -146,6 +147,7 @@ class GLow_strategy(Strategy):
         self.head_preds_per_class = [np.zeros((num_classes, num_classes), dtype=int) for _ in range(self.min_available_clients)]
         self.run_id = run_id
         self.training_time = [0.] * self.min_available_clients
+        self.aggregation_time = [0.] * self.min_available_clients
         self.num_classes = num_classes
         self.class_client_matrix_train = class_client_matrix_train
         self.seed = seed
@@ -294,7 +296,7 @@ class GLow_strategy(Strategy):
         num = lambda v: '-' if v is None else f'{v:.3f}'
         print(f'round {server_round}/{self.total_rounds}  glob {self.cur_glob_round}  head {head}  '
               f'loss {num(self.head_losses[head])}  acc {num(self.head_metrics[head])}  '
-              f'f1 {num(self.head_f1[head])}  train {self.training_time[head]:.1f}s  '
+              f'f1 {num(self.head_f1[head])}  train {self.training_time[head]:.1f}s  aggregation {self.aggregation_time[head]:.3f}ms '
               f'elapsed {elapsed/60:.1f} min  ETA {eta/60:.1f} min', flush=True)
 
 
@@ -305,18 +307,21 @@ class GLow_strategy(Strategy):
         params_dict = zip(net.state_dict().keys(), cli_params_ndarrays)
         state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         net.load_state_dict(state_dict, strict=True)
-        #torch.save(net.state_dict(), f'{param_path}r{server_round}_h{self.selected_head}.pth')
+        #Save head params per round
+        torch.save(net.state_dict(), f'{param_path}r{server_round}_h{self.selected_head}.pth')
         if server_round == self.total_rounds:
             self.save_on_finish()
 
     def save_on_finish(self):
         """Write <run_id>_heads.out, _result_matrix.out"""
+        #Save mean of training and aggregation time as well? -- Will need a var to increment and divide by number of rounds
         f = open(f"{self.save_path}{self.run_id}_traces.out", "w")
         f.write(self.out_buf)
         f.close()
+        num = lambda v: '-' if v is None else f'{v:.3f}'
         out = ''
         for cli_ID in range(self.min_available_clients):
-            out = out + 'head_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + ' loss: ' + str(self.head_losses[cli_ID]) + ' acc: ' + str(self.head_metrics[cli_ID]) + ' f1: ' +str(self.head_f1[cli_ID]) + '\n'
+            out = out + 'head_ID: ' + str(cli_ID) + ' neighbours: ' + str(self.topology[cli_ID]) + f' loss: {num(self.head_losses[cli_ID])}' + f' acc: {num(self.head_metrics[cli_ID])}' + f' f1: {num(self.head_f1[cli_ID])} \n'
         f = open(self.save_path + str(self.run_id) + "_heads.out", "w")
         f.write(out)
         f.close()
@@ -503,6 +508,8 @@ class GLow_strategy(Strategy):
         results_by_index = {
             self._cid_to_index[cli.cid]: fit_res for cli, fit_res in results
         }
+        #Measure time
+        start_event = time.perf_counter()
         if self.current_round <= self.warmup_rounds:
             aggregated_ndarrays = self_learning(results_by_index,up_neighbours, self.selected_head)
         elif self.aggregation == 'inplace':
@@ -520,6 +527,9 @@ class GLow_strategy(Strategy):
                 f"Unknown aggregation strategy '{self.aggregation}'. Expected one of: "
                 "'inplace', 'score', 'score_validation', 'approach_2'."
             )
+        
+        end_event = time.perf_counter()
+        aggregation_time = end_event - start_event
 
         parameters_aggregated = ndarrays_to_parameters(aggregated_ndarrays)
 
@@ -534,6 +544,7 @@ class GLow_strategy(Strategy):
         self.head_parameters[self.selected_head] = parameters_aggregated
 
         self.training_time[self.selected_head] = metrics_aggregated['training_time'][metrics_aggregated['cid'].index(self.selected_head)]
+        self.aggregation_time[self.selected_head] = aggregation_time * 1000
 
         self.history.add_metrics_distributed_fit(server_round=server_round, metrics=metrics_aggregated)
 
