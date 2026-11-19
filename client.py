@@ -5,6 +5,8 @@ one, per round, whether it's this round's "head" or one of its "neighbours"
 centralized FL has.
 """
 
+import copy
+import io
 from collections import OrderedDict
 from typing import Dict, Tuple, List
 from flwr.common import Context, NDArrays, Scalar
@@ -89,6 +91,8 @@ class FlowerClient(fl.client.NumPyClient):
                 self.model, self.trainloader, self.validationloader,
                 optim, epochs, self.num_classes, config['nature'], self.device
             )
+        elif 'head_params' in config:  # approach_2b
+            return self._fit_approach_2b(config)
 
         # Prob matrix always evaluated on head validation set
         prob_matrix, _ = compute_prob_matrix(
@@ -122,6 +126,42 @@ class FlowerClient(fl.client.NumPyClient):
             'prob_matrix': json.dumps(prob_matrix.flatten().tolist()),
             'training_time': training_time,
             'HEAD': 'YES' if is_head else 'NO',
+            'distr_val_loss': '##',
+            'energy used': '10W',
+        }
+
+    def _fit_approach_2b(self, config):
+        """approach_2b fit() reply for a non-head node. Confidence on the
+        head's val set is measured by the head (GLow_strategy); this node
+        reports, on its OWN val set, `dist_N` (per-class L2 between its and the
+        head's mean-softmax rows, the head being `config['head_params']`) and
+        `conf_own` (its per-class recall, the head's fallback for classes its
+        own val set lacks). -1 where this node has no samples of a class."""
+        C, nature = self.num_classes, config['nature']
+        acc, dist_N, conf_own = 0., [-1.] * C, [-1.] * C
+        if self._num_samples(self.validationloader) > 0:
+            _, acc, recall, _ = test(self.model, self.validationloader, C, nature, self.device)
+            own_prob, _ = compute_prob_matrix(self.model, self.validationloader, C, nature, self.device)
+            with np.load(io.BytesIO(config['head_params'])) as f:
+                head_params = [f[f'arr_{i}'] for i in range(len(f.files))]
+            head_model = copy.deepcopy(self.model)
+            head_model.load_state_dict(OrderedDict(
+                {k: torch.tensor(v) for k, v in zip(head_model.state_dict().keys(), head_params)}), strict=True)
+            head_prob, _ = compute_prob_matrix(head_model, self.validationloader, C, nature, self.device)
+            dist = torch.linalg.norm(own_prob - head_prob, dim=1)
+            has = own_prob.sum(dim=1) > 0
+            dist_N = [float(dist[c]) if has[c] else -1. for c in range(C)]
+            conf_own = [float(recall[c]) if has[c] else -1. for c in range(C)]
+
+        return self.get_parameters({}), self._num_samples(self.trainloader), {
+            'acc_val_distr': acc,
+            'cid': self.cid,
+            'centroid': json.dumps([]),
+            'dist_N': json.dumps(dist_N),
+            'conf_own': json.dumps(conf_own),
+            'prob_matrix': json.dumps([]),
+            'training_time': 0.,
+            'HEAD': 'NO',
             'distr_val_loss': '##',
             'energy used': '10W',
         }

@@ -97,12 +97,14 @@ def main():
     head_nature = []
     head_switch_malicious = []
     head_switch_random = []
+    head_switch_sl = []
     for i in range(num_clients):
         client_runtime = runtime['heads']['h'+str(i)]
         head_switch_down.append(as_list(client_runtime['down']))
         head_switch_up.append(as_list(client_runtime['up']))
         head_switch_malicious.append(as_list(client_runtime['malicious']))
         head_switch_random.append(as_list(client_runtime.get('random')))  # older runtime files lack it
+        head_switch_sl.append(as_list(client_runtime.get('sl')))  # older runtime files lack it
         head_status.append(client_runtime['status'])
         head_nature.append(client_runtime['nature'])
     
@@ -153,6 +155,7 @@ def main():
         head_switch_up=head_switch_up,
         head_switch_malicious=head_switch_malicious,
         head_switch_random=head_switch_random,
+        head_switch_sl=head_switch_sl,
         head_status=head_status,
         head_nature=head_nature,
         seed = cfg['seed'],
@@ -160,6 +163,7 @@ def main():
         warmup_rounds = cfg['warmup_rounds'],
         warmup_epochs = cfg['warmup_epochs'],
         dataset = cfg['dataset'],
+        validationloaders = validationloaders,
     )
 
     server_config = ServerConfig(num_rounds=cfg['num_rounds'])
@@ -203,9 +207,13 @@ def main():
     print('#################')
     print(str({k: v for k, v in history.metrics_centralized.items() if k != 'preds_per_class'}))
 
-    out = "**losses_distributed: " + ' '.join([str(elem) for elem in history.losses_distributed]) + "\n**losses_avg: " + ' '.join([str(elem) for elem in history.losses_centralized])
-    out = out + '\n**acc_distr: ' + ' '.join([str(elem) for elem in history.metrics_distributed['acc_distr']]) + '\n**cid: ' + ' '.join([str(elem) for elem in history.metrics_distributed['cid']])
-    out = out + '\n**acc_avg: ' + ' '.join([str(elem) for elem in history.metrics_centralized['acc_cntrl']]) + '\n**macro_f1: ' + ' '.join([str(elem) for elem in history.metrics_centralized['macro_f1']])
+    join = lambda series: ' '.join(str(elem) for elem in series)
+    out = '**round_head_neighbors: ' + join(strategy.round_log)  # (round, head, [nodes aggregated])
+    out += '\n**losses_distributed: ' + join(history.losses_distributed)
+    out += '\n**accuracies_distributed: ' + join(history.metrics_distributed['acc_distr'])
+    out += '\n**losses_avg: ' + join(history.losses_centralized)
+    out += '\n**accuracies_avg: ' + join(history.metrics_centralized['acc_cntrl'])
+    out += '\n**macro_f1: ' + join(history.metrics_centralized['macro_f1'])
     out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + run_id + "_raw.out", "w")
     f.write(out)

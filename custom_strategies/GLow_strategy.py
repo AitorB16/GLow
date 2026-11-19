@@ -17,9 +17,12 @@ Rotating-head design: each round one node in `topology` is head
 (`select_head`), its up-neighbours train from the head's parameters
 (`get_up_neighbors`), `aggregate_fit` folds results back into
 `self.head_parameters[head]`. `head_switch_*`/`head_check` schedule nodes
-going up/down/malicious per round.
+going up/down/sl/malicious/random per round. A 'down' head wastes its round
+(nothing trains); an 'sl' head trains alone. Down and sl nodes never take
+part in another head's round (aggregation).
 """
 
+import io
 import os
 import time
 import json
@@ -28,7 +31,7 @@ import flwr
 import numpy as np
 from collections import OrderedDict
 import torch
-from models import build_model
+from models import build_model, test
 
 from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -51,7 +54,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.history import History
 
-from flwr_lib_modifications.aggregate import self_learning, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, weighted_loss_avg, aggregate_krum
+from flwr_lib_modifications.aggregate import self_learning, aggregate_inplace, aggregate_score, aggregate_score_validation, aggregate_score_centroids_2, aggregate_score_centroids_2b, aggregate_trimmed_mean, weighted_loss_avg, aggregate_krum
 from flwr.server.strategy.strategy import Strategy
 
 from  flwr.server.criterion import Criterion
@@ -69,7 +72,7 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 # pylint: disable=line-too-long
 class GLow_strategy(Strategy):
-    """Decentralized gossip-learning strategy. https://arxiv.org/abs/2501.10463
+    """Decentralized gossip-learning strategy. https://www.sciencedirect.com/science/article/pii/S074373152600050X
     See module docstring for the rotating-head mechanic.
     """
 
@@ -105,6 +108,7 @@ class GLow_strategy(Strategy):
         head_switch_up: List[List[int]],
         head_switch_malicious: List[List[int]],
         head_switch_random: List[List[int]],
+        head_switch_sl: List[List[int]],
         head_status: List[str],
         head_nature: List[str],
         seed: int,
@@ -112,6 +116,7 @@ class GLow_strategy(Strategy):
         warmup_rounds: Optional[int] = None,
         warmup_epochs: int = 15,
         dataset: str = 'mnist',
+        validationloaders: Optional[List] = None,
     ) -> None:
         super().__init__()
 
@@ -160,6 +165,7 @@ class GLow_strategy(Strategy):
         self.head_switch_up = head_switch_up
         self.head_switch_malicious = head_switch_malicious
         self.head_switch_random = head_switch_random
+        self.head_switch_sl = head_switch_sl
         self.head_status = head_status
         self.head_nature = head_nature
         # ClientProxy.cid -> topology index; simulation ID maps to client ID
@@ -167,6 +173,18 @@ class GLow_strategy(Strategy):
         self.history = History()
         # Caches aggregate_fit()'s per-neighbour eval for neighbours
         self._last_eval_results = {}
+        # For raw output
+        self._last_central = {}
+        self._last_distr = {}
+        self.round_log = []
+        # approach_2b: the head measures every neighbour on its own val set -- assume validationloaders exist...
+        self.validationloaders = validationloaders
+        self.val_has_class = []
+        for loader in validationloaders:
+            present = set() if loader == '' else {int(c) for _, labels in loader for c in labels.unique()}
+            self.val_has_class.append([c in present for c in range(num_classes)])
+        
+        
         # per-node list of neighbour accuracies/params
         self.neigh_metrics = []
         for i in range(min_available_clients):
@@ -185,13 +203,14 @@ class GLow_strategy(Strategy):
         return [cid for cid, idx in self._cid_to_index.items() if idx in index_set]
 
     def get_up_neighbors(self):
-        """Online neighbours of the current head; includes the head itself."""
-        neighbors = self.topology[self.selected_head]
-        up_neighbors = []
-        for neighbor in neighbors:
-            if self.head_status[neighbor] == 'up':
-                up_neighbors.append(neighbor)
-        return up_neighbors
+        """Nodes taking part in the current head's round: its 'up' neighbours,
+        itself included; only itself when 'sl'; nobody when 'down'."""
+        status = self.head_status[self.selected_head]
+        if status == 'down':
+            return []
+        if status == 'sl':
+            return [self.selected_head]
+        return [n for n in self.topology[self.selected_head] if self.head_status[n] == 'up']
 
     def head_check(self):
         """Apply this round's scheduled up/down/malicious/random transitions."""
@@ -208,6 +227,9 @@ class GLow_strategy(Strategy):
             if self.head_switch_random[agent] is not None:
                 if self.current_round in self.head_switch_random[agent]:
                     self.turn_bad(agent, 'random')
+            if self.head_switch_sl[agent] is not None:
+                if self.current_round in self.head_switch_sl[agent]:
+                    self.head_status[agent] = 'sl'
 
     def turn_bad(self, agent, nature):
         """Make `agent` a 'malicious' or 'random' node (label noise in
@@ -222,16 +244,10 @@ class GLow_strategy(Strategy):
         self.head_parameters[agent] = self.initial_parameters[agent]
 
     def select_head(self):
-        """Rotate to this round's head (first online node in client_list)
-        and advance current_round."""
-        search = True
-        while search:
-            self.selected_head = self.client_list[0]
-            self.head_check()
-            if self.head_status[self.selected_head] == 'up':
-                search = False
-            else:
-                self.client_list = np.roll(self.client_list, -1).tolist()
+        """Rotate to this round's head (next node in client_list, whatever its
+        status: a 'down' head wastes the round) and advance current_round."""
+        self.selected_head = self.client_list[0]
+        self.head_check()
         self.client_list = np.roll(self.client_list, -1).tolist()
         self.current_round += 1
         if self.current_round % self.min_available_clients == 0:
@@ -280,7 +296,6 @@ class GLow_strategy(Strategy):
         initial_parameters = self.initial_parameters[self.selected_head]
         self.current_round = -1
         self.cur_glob_round = -1
-        self._t0 = time.time()  # for the progress line's ETA
         return initial_parameters
 
     def save_results(self, server_round):
@@ -288,16 +303,15 @@ class GLow_strategy(Strategy):
         _parameters/<id>.pth."""
         if self.current_round < 0: 
             return
-        self.out_buf += f'head_ID: {str(self.selected_head)} round ID: {self.cur_glob_round} neighbours: {str(self.topology[self.selected_head])} loss: {str(self.head_losses[self.selected_head])} acc: {str(self.head_metrics[self.selected_head])} f1: {str(self.head_f1[self.selected_head])} training_time: {str(self.training_time[self.selected_head])}\n'
-        # Progress line, parsed by dashboard/server.py: keep "round N/T" and "ETA".
+        # neighbours: the nodes that took part (just the head when down/sl);
+        # a down head's line repeats its last metrics (its model didn't change)
+        shown = self.get_up_neighbors() or [self.selected_head]
+        self.out_buf += f'head_ID: {str(self.selected_head)} round ID: {self.cur_glob_round} neighbours: {str(shown)} loss: {str(self.head_losses[self.selected_head])} acc: {str(self.head_metrics[self.selected_head])} f1: {str(self.head_f1[self.selected_head])} training_time: {str(self.training_time[self.selected_head])} status: {self.head_status[self.selected_head]}\n'
         head = self.selected_head
-        elapsed = time.time() - self._t0
-        eta = elapsed / server_round * (self.total_rounds - server_round)
         num = lambda v: '-' if v is None else f'{v:.3f}'
         print(f'round {server_round}/{self.total_rounds}  glob {self.cur_glob_round}  head {head}  '
               f'loss {num(self.head_losses[head])}  acc {num(self.head_metrics[head])}  '
-              f'f1 {num(self.head_f1[head])}  train {self.training_time[head]:.1f}s  aggregation {self.aggregation_time[head]:.3f}ms '
-              f'elapsed {elapsed/60:.1f} min  ETA {eta/60:.1f} min', flush=True)
+              f'f1 {num(self.head_f1[head])}  train {self.training_time[head]:.1f}s  aggregation {self.aggregation_time[head]:.3f}ms', flush=True)
 
 
         param_path = f'{self.save_path}{self.run_id}_parameters/'
@@ -350,6 +364,22 @@ class GLow_strategy(Strategy):
         if self.evaluate_fn is None:
             return None
 
+        if server_round > 0:
+            head, up = self.selected_head, self.get_up_neighbors()
+            self.round_log.append((server_round, head, [head] * (head in up) + sorted(n for n in up if n != head)))
+
+        if self.head_status[self.selected_head] == 'down':  # wasted round: repeat the last values
+            head = self.selected_head
+            if head in self._last_central:
+                loss, metrics = self._last_central[head]
+                self.history.add_loss_centralized(server_round=server_round, loss=loss)
+                self.history.add_metrics_centralized(server_round=server_round, metrics=metrics)
+            if head in self._last_distr:  # the head's own last loss; nobody aggregated
+                self.history.add_loss_distributed(server_round=server_round, loss=self._last_distr[head])
+                self.history.add_metrics_distributed(server_round=server_round, metrics={'acc_distr': []})
+            self.save_results(server_round)
+            return None
+
         head_loss = None
         head_metrics = None
 
@@ -391,6 +421,7 @@ class GLow_strategy(Strategy):
 
         self.history.add_loss_centralized(server_round=server_round, loss=head_loss)
         self.history.add_metrics_centralized(server_round=server_round, metrics=head_metrics)
+        self._last_central[self.selected_head] = (head_loss, head_metrics)
 
         return head_loss, head_metrics
 
@@ -402,6 +433,8 @@ class GLow_strategy(Strategy):
         
         self.select_head()
         connections = self.get_up_neighbors()
+        if not connections:  # 'down' head: the round is wasted
+            return []
 
         class select_criterion(Criterion):
             def __init__(self, cid_list):
@@ -412,12 +445,19 @@ class GLow_strategy(Strategy):
         clients = client_manager.sample(
             num_clients=len(connections), criterion=select_criterion(self._cids_for_indices(connections))
         )
+        if self.aggregation == 'approach_2b':
+            # neighbours compute dist_N against the head's current (pre-training) params
+            buf = io.BytesIO()
+            np.savez(buf, *parameters_to_ndarrays(self.head_parameters[self.selected_head]))
+            head_params = buf.getvalue()
         pairs = []
         for client in clients:
             index = self._cid_to_index[client.cid]
             config = {}
             if self.on_fit_config_fn is not None:
                 config = self.on_fit_config_fn(server_round)
+            if self.aggregation == 'approach_2b' and index != self.selected_head:
+                config['head_params'] = head_params
             # neighbour ids JSON-encoded -- legacy config bridge only allows scalars
             config['neighbors'] = json.dumps(connections)
             config['head_cid'] = self.selected_head
@@ -447,6 +487,8 @@ class GLow_strategy(Strategy):
             return []
 
         connections = self.get_up_neighbors()
+        if not connections:  # 'down' head
+            return []
 
         clients = client_manager.sample(
             num_clients=len(connections), criterion=select_criterion(self._cids_for_indices(connections))
@@ -510,22 +552,27 @@ class GLow_strategy(Strategy):
         }
         #Measure time
         start_event = time.perf_counter()
-        if self.current_round <= self.warmup_rounds:
+        if self.current_round <= self.warmup_rounds or self.head_status[self.selected_head] == 'sl':
             aggregated_ndarrays = self_learning(results_by_index,up_neighbours, self.selected_head)
         elif self.aggregation == 'inplace':
             aggregated_ndarrays = aggregate_inplace(results_by_index)
         elif self.aggregation == 'krum':
             aggregated_ndarrays = aggregate_krum(results_by_index, 1, 2)
+        elif self.aggregation == 'trimmed_mean':
+            aggregated_ndarrays = aggregate_trimmed_mean(results_by_index, 1)
         elif self.aggregation == 'score':
             aggregated_ndarrays = aggregate_score(results_by_index, self.neigh_metrics[self.selected_head], up_neighbours, self.selected_head)
         elif self.aggregation == 'score_validation':
             aggregated_ndarrays = aggregate_score_validation(results_by_index, up_neighbours, self.selected_head)
         elif self.aggregation == 'approach_2':
             aggregated_ndarrays = aggregate_score_centroids_2(results_by_index, up_neighbours, self.selected_head, self.current_round, self.class_client_matrix_train, self.num_classes, 0.4, 0.6, 0.)
+        elif self.aggregation == 'approach_2b':
+            conf_head_val = {n: self._recall_on_head_val(fit_res, server_round, n) for n, fit_res in results_by_index.items()}
+            aggregated_ndarrays = aggregate_score_centroids_2b(results_by_index, up_neighbours, self.selected_head, conf_head_val, self.val_has_class[self.selected_head], self.class_client_matrix_train, self.num_classes)
         else:
             raise ValueError(
                 f"Unknown aggregation strategy '{self.aggregation}'. Expected one of: "
-                "'inplace', 'score', 'score_validation', 'approach_2'."
+                "'inplace', 'krum', 'trimmed_mean', 'score', 'score_validation', 'approach_2', 'approach_2b'."
             )
         
         end_event = time.perf_counter()
@@ -549,6 +596,19 @@ class GLow_strategy(Strategy):
         self.history.add_metrics_distributed_fit(server_round=server_round, metrics=metrics_aggregated)
 
         return parameters_aggregated, metrics_aggregated
+
+    def _recall_on_head_val(self, fit_res, server_round, node):
+        """approach_2b: per-class recall of `node`'s returned parameters on
+        the head's val set (zeros if the head has no val data)."""
+        loader = self.validationloaders[self.selected_head]
+        if loader == '':
+            return np.zeros(self.num_classes)
+        torch.manual_seed(self._round_seed(server_round, node))
+        net = build_model(self.dataset, self.num_classes)
+        state = zip(net.state_dict().keys(), parameters_to_ndarrays(fit_res.parameters))
+        net.load_state_dict(OrderedDict({k: torch.tensor(v) for k, v in state}), strict=True)
+        _, _, recall, _ = test(net, loader, self.num_classes, self.head_nature[self.selected_head], torch.device('cpu'))
+        return recall.numpy().astype(float)
 
     def aggregate_evaluate(
         self,
@@ -577,8 +637,13 @@ class GLow_strategy(Strategy):
             metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
         elif server_round == 1:
             log(WARNING, "No evaluate_metrics_aggregation_fn provided")
+        if 'cid' in metrics_aggregated:  # head first, then ascending: the order of round_log
+            pos = sorted(range(len(metrics_aggregated['cid'])), key=lambda i: metrics_aggregated['cid'][i] != self.selected_head)
+            metrics_aggregated = {k: [v[i] for i in pos] for k, v in metrics_aggregated.items()}
 
         self.history.add_loss_distributed(server_round=server_round, loss=loss_aggregated)
         self.history.add_metrics_distributed(server_round=server_round, metrics=metrics_aggregated)
+        for proxy, res in results:
+            self._last_distr[self._cid_to_index[proxy.cid]] = res.loss
 
         return loss_aggregated, metrics_aggregated

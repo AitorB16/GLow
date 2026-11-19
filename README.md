@@ -33,9 +33,9 @@ Configuration files in GLow are composed by a base file and a topology file.
 Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
 - **dataset:** str; dataset and its model, select among *'cifar'*, *'mnist'*, *'tiot'*
-- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*, *'krum'*
+- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*, *'approach_2b'*, *'krum'*, *'trimmed_mean'*
 - **topology:** str; path to yaml file containing system topology
-- **runtime**: str; path to file describing run time of simulation (nodes going up/down, becoming malicious/random...)
+- **runtime**: str; path to file describing run time of simulation (nodes going up/down/sl, becoming malicious/random...). A *down* head wastes its round; an *sl* head trains alone (self-learning); down and sl nodes take no part in other heads' rounds
 - **split_dataset:** str; split dataset among agents, select among *'split_iid_train_common_test'*, *'split_niid_train_common_test'*,*'split_iid_train_iid_test'*, *'split_niid_train_iid_test'*, *'split_niid_train_niid_test'*,
 *'split_class_niid_train_common_test'*, *'split_class_niid_train_niid_test'*
 - **alpha:** Dirichlet parameter; float for *'split_class_niid_\*'*, float list (one per agent) for *'split_niid_\*'*, ignored by *'split_iid_\*'*
@@ -113,7 +113,7 @@ The output of each experiment consists in the following files:
 - **\<run_id>_result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics
 - **\<run_id>_heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
 - **\<run_id>_traces.out:** Training traces per aggregation per agent per communication round --  in a round-robin configuration, the loop of all the agents is considered a round.
-- **\<run_id>_raw.out:** Full output; *losses_distributed*, *losses_avg, *acc_distr*, *cid*, *acc_avg*, *macro_f1*, *Exec_time*
+- **\<run_id>_raw.out:** Full output; *round_head_neighbors* (round, head, nodes aggregated), *losses_distributed*, *accuracies_distributed* (in *round_head_neighbors* order), *losses_avg*, *accuracies_avg*, *macro_f1*, *Exec_time*
 - **\<run_id>_parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
 
 ## Visualization

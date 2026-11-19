@@ -23,20 +23,23 @@ GLow_strategy.aggregate_fit() via `self.aggregation`:
   neighbour's own accuracy (centralized / self-reported).
 - `aggregate_score_centroids_2` ('approach_2'): per-class distance/
   confidence/size score.
-
-`results` is `{topology_index: FitRes}` -- built via `_cid_to_index` since
-ClientProxy.cid is an opaque simulation id, not the topology index.
-
+- `aggregate_score_centroids_2b` ('approach_2b'): approach_2 with distance
+  on the neighbour's val set and confidence on the head's.
+- `aggregate_trimmed_mean` ('trimmed_mean'): coordinate-wise trimmed mean
+  over the head's and its neighbours' models.
 - `aggregate_krum` ('krum'): Flower's Krum/MultiKrum, adapted to take
   `{topology_index: FitRes}`.
 
-Flower's other generic/Byzantine-robust aggregation rules (Bulyan,
-trimmed-mean, Q-FFL, plain median/weighted-average) are kept below the GLow
+Flower's other generic/Byzantine-robust aggregation rules (its own
+trimmed-average, Q-FFL, plain median/weighted-average) are kept below the GLow
 ones -- none of them are wired into this dispatch.
+
+`results` is `{topology_index: FitRes}` -- built via `_cid_to_index` since
+ClientProxy.cid is an opaque simulation id, not the topology index.
 """
 
 from functools import reduce
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import json
@@ -171,7 +174,7 @@ def aggregate_score_centroids_2(
 
     ordered_results = [(n, results[n]) for n in neighbours if n in results]
     if head_id not in results:
-        raise ValueError(f"Head {head_id}'s own fit() result is missing (Flower reported it as a failure) -- cannot aggregate without it.")
+        raise ValueError(f"Head {head_id}'s own fit() result is missing -- cannot aggregate without it.")
     present_neighbours = [n for n, _ in ordered_results]
 
     metrics_map = {idx: fit_res.metrics for idx, fit_res in ordered_results}
@@ -261,6 +264,77 @@ def aggregate_score_centroids_2(
     return aggregated_params
 
 
+def aggregate_score_centroids_2b(
+    results: Dict[int, FitRes],
+    neighbours: List[int],
+    head_id: int,
+    conf_head_val: Dict[int, NDArray],
+    head_val_has: List[bool],
+    class_client_matrix: List[List[int]],
+    class_number: int,
+    alpha: float = 0.4,
+    beta: float = 0.6,
+) -> NDArrays:
+    """approach_2b: approach_2 with the data behind its two signals swapped.
+
+    approach_2   distance: head's val set       confidence: neighbour's val set
+    approach_2b  distance: neighbour's val set  confidence: head's val set
+
+    distance[n][c]: `dist_N` reported by n (L2 between its and the head's
+      mean-softmax rows on n's own val set), gated on train-set class
+      coverage as in approach_2.
+    confidence[n][c]: recall of n's parameters on the head's val set
+      (`conf_head_val`, measured by the head); for classes absent from the
+      head's val set it falls back to n's self-reported recall `conf_own`.
+    score = distance**alpha * confidence**beta, normalized per class, summed,
+    renormalized into one weight per neighbour."""
+
+    if head_id not in results:
+        raise ValueError(f"Head {head_id}'s own fit() result is missing -- cannot aggregate without it.")
+    ordered = [(n, results[n]) for n in neighbours if n in results]
+    head_checks = np.asarray(head_val_has)
+    head_has = np.array(class_client_matrix[head_id]) > 0
+
+    def reported(fit_res, key):
+        return np.maximum(np.array(json.loads(fit_res.metrics[key]), dtype=float), 0.)  # -1 = no samples
+
+    v_conf = np.zeros((len(ordered), class_number))
+    v_distance = np.ones((len(ordered), class_number))
+    for i, (n, fit_res) in enumerate(ordered):
+        if n == head_id:
+            v_conf[i] = conf_head_val[n]
+            continue
+        n_has = np.array(class_client_matrix[n]) > 0
+        v_conf[i] = np.where(head_checks, conf_head_val[n], reported(fit_res, 'conf_own'))
+        v_distance[i] = np.where(head_has & n_has, reported(fit_res, 'dist_N'), ~head_has & n_has)
+
+    raw_score = (v_distance ** alpha) * (v_conf ** beta)
+    raw_score_sum = raw_score.sum(axis=0)
+    v_score = np.divide(raw_score, raw_score_sum, out=np.zeros_like(raw_score), where=raw_score_sum > 0)
+    global_score = v_score.sum(axis=1)
+    weights = global_score / global_score.sum() if global_score.sum() > 0 else np.ones(len(ordered)) / len(ordered)
+
+    params = [np.zeros_like(layer) for layer in parameters_to_ndarrays(ordered[0][1].parameters)]
+    for w, (_, fit_res) in zip(weights, ordered):
+        for k, layer in enumerate(parameters_to_ndarrays(fit_res.parameters)):
+            params[k] += w * layer
+    return params
+
+
+def aggregate_trimmed_mean(results: Dict[int, FitRes], trim: int = 1) -> NDArrays:
+    """Coordinate-wise trimmed mean: per parameter, drop the `trim` highest
+    and `trim` lowest values among the models and average the rest. With too
+    few models, `trim` shrinks so at least one value is kept (3 models and
+    trim=1 -> the median; 1 or 2 models -> plain mean)."""
+    models = [parameters_to_ndarrays(results[idx].parameters) for idx in sorted(results)]
+    k = min(trim, (len(models) - 1) // 2)
+    params = []
+    for layers in zip(*models):
+        stacked = np.sort(np.stack(layers), axis=0)
+        params.append(stacked[k:len(models) - k].mean(axis=0).astype(layers[0].dtype))
+    return params
+
+
 def weighted_loss_avg(results: List[Tuple[int, float]]) -> float:
     """Aggregate evaluation results obtained from multiple clients."""
     num_total_evaluation_examples = sum(num_examples for (num_examples, _) in results)
@@ -335,92 +409,12 @@ def aggregate_krum(
         # Choose to_keep clients and return their average (MultiKrum)
         best_indices = np.argsort(scores)[::-1][len(scores) - to_keep :]  
         best_results = [results[i] for i in best_indices]
+        if sum(n for _, n in best_results) == 0:  # no chosen model holds data: equal weights
+            best_results = [(w, 1) for w, _ in best_results]
         return aggregate(best_results)
 
     # Return the model parameters that minimize the score (Krum)
     return weights[np.argmin(scores)]
-
-
-# pylint: disable=too-many-locals
-def aggregate_bulyan(
-    results: List[Tuple[NDArrays, int]],
-    num_malicious: int,
-    aggregation_rule: Callable,  # type: ignore
-    **aggregation_rule_kwargs: Any,
-) -> NDArrays:
-    """Perform Bulyan aggregation.
-
-    Parameters
-    ----------
-    results: List[Tuple[NDArrays, int]]
-        Weights and number of samples for each of the client.
-    num_malicious: int
-        The maximum number of malicious clients.
-    aggregation_rule: Callable
-        Byzantine resilient aggregation rule used as the first step of the Bulyan
-    aggregation_rule_kwargs: Any
-        The arguments to the aggregation rule.
-    Returns
-    -------
-    aggregated_parameters: NDArrays
-        Aggregated parameters according to the Bulyan strategy.
-    """
-    byzantine_resilient_single_ret_model_aggregation = [aggregate_krum]
-    # also GeoMed (but not implemented yet)
-    byzantine_resilient_many_return_models_aggregation = []  # type: ignore
-    # Brute, Medoid (but not implemented yet)
-
-    num_clients = len(results)
-    if num_clients < 4 * num_malicious + 3:
-        raise ValueError(
-            "The Bulyan aggregation requires then number of clients to be greater or "
-            "equal to the 4 * num_malicious + 3. This is the assumption of this method."
-            "It is needed to ensure that the method reduces the attacker's leeway to "
-            "the one proved in the paper."
-        )
-    selected_models_set: List[Tuple[NDArrays, int]] = []
-
-    theta = len(results) - 2 * num_malicious
-    beta = theta - 2 * num_malicious
-
-    for _ in range(theta):
-        best_model = aggregation_rule(
-            results=results, num_malicious=num_malicious, **aggregation_rule_kwargs
-        )
-        list_of_weights = [weights for weights, num_samples in results]
-        # This group gives exact result
-        if aggregation_rule in byzantine_resilient_single_ret_model_aggregation:
-            best_idx = _find_reference_weights(best_model, list_of_weights)
-        # This group requires finding the closest model to the returned one
-        # (weights distance wise)
-        elif aggregation_rule in byzantine_resilient_many_return_models_aggregation:
-            # when different aggregation strategies available
-            # write a function to find the closest model
-            raise NotImplementedError(
-                "aggregate_bulyan currently does not support the aggregation rules that"
-                " return many models as results. "
-                "Such aggregation rules are currently not available in Flower."
-            )
-        else:
-            raise ValueError(
-                "The given aggregation rule is not added as Byzantine resilient. "
-                "Please choose from Byzantine resilient rules."
-            )
-
-        selected_models_set.append(results[best_idx])
-
-        # remove idx from tracker and weights_results
-        results.pop(best_idx)
-
-    # Compute median parameter vector across selected_models_set
-    median_vect = aggregate_median(selected_models_set)
-
-    # Take the averaged beta parameters of the closest distance to the median
-    # (coordinate-wise)
-    parameters_aggregated = _aggregate_n_closest_weights(
-        median_vect, selected_models_set, beta_closest=beta
-    )
-    return parameters_aggregated
 
 
 def aggregate_qffl(
@@ -491,86 +485,3 @@ def aggregate_trimmed_avg(
     ]
 
     return trimmed_w
-
-
-def _check_weights_equality(weights1: NDArrays, weights2: NDArrays) -> bool:
-    """Check if weights are the same."""
-    if len(weights1) != len(weights2):
-        return False
-    return all(
-        np.array_equal(layer_weights1, layer_weights2)
-        for layer_weights1, layer_weights2 in zip(weights1, weights2)
-    )
-
-
-def _find_reference_weights(
-    reference_weights: NDArrays, list_of_weights: List[NDArrays]
-) -> int:
-    """Find the reference weights by looping through the `list_of_weights`.
-
-    Raise Error if the reference weights is not found.
-
-    Parameters
-    ----------
-    reference_weights: NDArrays
-        Weights that will be searched for.
-    list_of_weights: List[NDArrays]
-        List of weights that will be searched through.
-
-    Returns
-    -------
-    index: int
-        The index of `reference_weights` in the `list_of_weights`.
-
-    Raises
-    ------
-    ValueError
-        If `reference_weights` is not found in `list_of_weights`.
-    """
-    for idx, weights in enumerate(list_of_weights):
-        if _check_weights_equality(reference_weights, weights):
-            return idx
-    raise ValueError("The reference weights not found in list_of_weights.")
-
-
-def _aggregate_n_closest_weights(
-    reference_weights: NDArrays, results: List[Tuple[NDArrays, int]], beta_closest: int
-) -> NDArrays:
-    """Calculate element-wise mean of the `N` closest values.
-
-    Note, each i-th coordinate of the result weight is the average of the beta_closest
-    -ith coordinates to the reference weights
-
-
-    Parameters
-    ----------
-    reference_weights: NDArrays
-        The weights from which the distances will be computed
-    results: List[Tuple[NDArrays, int]]
-        The weights from models
-    beta_closest: int
-        The number of the closest distance weights that will be averaged
-
-    Returns
-    -------
-    aggregated_weights: NDArrays
-        Averaged (element-wise) beta weights that have the closest distance to
-         reference weights
-    """
-    list_of_weights = [weights for weights, num_examples in results]
-    aggregated_weights = []
-
-    for layer_id, layer_weights in enumerate(reference_weights):
-        other_weights_layer_list = []
-        for other_w in list_of_weights:
-            other_weights_layer = other_w[layer_id]
-            other_weights_layer_list.append(other_weights_layer)
-        other_weights_layer_np = np.array(other_weights_layer_list)
-        diff_np = np.abs(layer_weights - other_weights_layer_np)
-        indices = np.argpartition(diff_np, kth=beta_closest - 1, axis=0)
-        beta_closest_weights = np.take_along_axis(
-            other_weights_layer_np, indices=indices, axis=0
-        )[:beta_closest]
-        aggregated_weights.append(np.mean(beta_closest_weights, axis=0))
-    return aggregated_weights
-
