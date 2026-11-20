@@ -4,7 +4,7 @@ GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed s
 ## Directory structure
 - **conf (configuration files)**: YAML configuration files
 - **conf/topologies (topologies architecture and run time instructions)**: YAML files describing system topology and run time behavior
-- **custom_strategies**: Custom GLow strategy with *FedAVG* and *ScoreAVG* aggregation algorithms
+- **custom_strategies**: Custom GLow strategies -- *GLow_vanilla* (rotating head), *GLow_gossip* (random pairwise gossip) and *GLow_NAvg* (rotating head neighbour averaging)
 - **flwr_lib_modifications**: Updated files from internal Flower architecture
 - **visualization**: Notebooks to visualize GLow and centralized FL outputs as well as topology architecture (graphs)
 
@@ -21,8 +21,11 @@ uv sync
 ## Dataset
 The implementation works with [CIFAR10](https://pytorch.org/vision/main/generated/torchvision.datasets.CIFAR10.html) and [MNIST](https://pytorch.org/vision/main/generated/torchvision.datasets.MNIST.html), selected with the **dataset** key. Both are downloaded on first run into the [.datasets](./.datasets) directory.
 
->Note: TON_IoT (*'tiot'*) is read from *.datasets/TON_IOT_train_test_datasets/Train_Test_Network_dataset/train_test_network.csv*, which has to be placed manually.
 
+>Note: TON_IoT (*'tiot'*) is read from *.datasets/TON_IOT_train_test_datasets/Train_Test_Network_dataset/train_test_network.csv*, which has to be placed manually.
+<!--
+>Note: RealWorld HAR (*'har'*) is read from *.datasets/dati_realworld/subject_<id>/acc_<activity>_forearm.csv* (8 activities, `num_classes: 8`), which has to be placed manually. Every subject is z-scored, cut into 128-step windows (50% overlap) and 20% of its windows are held out as test.
+--->
 ## Configuration files
 
 Configuration files in GLow are composed by a base file and a topology file.
@@ -32,12 +35,16 @@ Configuration files in GLow are composed by a base file and a topology file.
 
 Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **run_name:** str; run name
-- **dataset:** str; dataset and its model, select among *'cifar'*, *'mnist'*, *'tiot'*
-- **aggregation:** str; aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*, *'approach_2b'*, *'krum'*, *'trimmed_mean'*
+- **strategy:** str; *'vanilla'* ([GLow_vanilla.py](custom_strategies/GLow_vanilla.py), rotating head) or *'gossip'* ([GLow_gossip.py](custom_strategies/GLow_gossip.py), random pairwise gossip) or *'navg'* ([GLow_NAvg.py](custom_strategies/GLow_NAvg.py), rotating head averages with its neighbours)
+- **train_mode:** str (gossip/navg only); *'all'* (every active node trains each round) or *'head_only'* (only the head trains: drawn at random for gossip, round-robin for navg)
+- **num_gossip_iterations:** int (gossip only); pairwise exchange attempts per round
+- **share_with_neighbors:** bool (navg only); neighbours also receive the head's average (False: only the head)
+- **dataset:** str; dataset and its model, select among *'cifar'*, *'mnist'*, *'tiot'*, *'har'*
+- **aggregation:** str (vanilla only); aggragation algorithm, select among *'inplace'*, *'score'*, *'score_validation'*, *'approach_2'*, *'approach_2b'*, *'krum'*, *'trimmed_mean'*
 - **topology:** str; path to yaml file containing system topology
-- **runtime**: str; path to file describing run time of simulation (nodes going up/down/sl, becoming malicious/random...). A *down* head wastes its round; an *sl* head trains alone (self-learning); down and sl nodes take no part in other heads' rounds
+- **runtime**: str; path to file describing run time of simulation (nodes going up/down/sl, becoming malicious/random...). A *down* head wastes its round; an *sl* head trains alone (self-learning); down and sl nodes take no part in other heads' rounds. Every node lists *down*, *up*, *malicious*, *random*, *sl* (round lists, may be empty), *status* and *nature*
 - **split_dataset:** str; split dataset among agents, select among *'split_iid_train_common_test'*, *'split_niid_train_common_test'*,*'split_iid_train_iid_test'*, *'split_niid_train_iid_test'*, *'split_niid_train_niid_test'*,
-*'split_class_niid_train_common_test'*, *'split_class_niid_train_niid_test'*
+*'split_class_niid_train_common_test'*, *'split_class_niid_train_niid_test'*, *'split_subject_train_subject_test'* (one subject per agent with data; *'har'* only)
 - **alpha:** Dirichlet parameter; float for *'split_class_niid_\*'*, float list (one per agent) for *'split_niid_\*'*, ignored by *'split_iid_\*'*
 - **num_rounds:** int; total number of communication rounds
 - **batch_size:** int; hyperparameter for DataLoader
@@ -46,8 +53,9 @@ Example file located in [conf/base.yaml](conf/base.yaml) following structure:
 - **warmup_rounds:** int; every participant trains for `warmup_epochs` instead of `config_fit.local_epochs` for the first `warmup_rounds` communication rounds.
 - **warmup_epochs:** int; epoch count used during the warm-up window above.
 - **config_fit:** hyperparameters
+    - **optimizer:** str; *'adam'* or *'sgd'*
     - **lr:** float; learning rate
-    - **momentum:** float; momentum
+    - **momentum:** float; momentum (*'sgd'* only)
     - **local_epochs:**  int; epochs to be performed by each agent with local instances (after the warm-up window)
 
 ### Topology
@@ -115,6 +123,7 @@ The output of each experiment consists in the following files:
 - **\<run_id>_traces.out:** Training traces per aggregation per agent per communication round --  in a round-robin configuration, the loop of all the agents is considered a round.
 - **\<run_id>_raw.out:** Full output; *round_head_neighbors* (round, head, nodes aggregated), *losses_distributed*, *accuracies_distributed* (in *round_head_neighbors* order), *losses_avg*, *accuracies_avg*, *macro_f1*, *Exec_time*
 - **\<run_id>_parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
+- **\<run_id>_gossip_tracking.csv:** (gossip/navg only) Local and global test loss/accuracy per agent per round, before and after aggregation
 
 ## Visualization
 
@@ -134,7 +143,7 @@ Ray sizes its actor pool and object store from the whole node rather than from a
 
 > Note: Optionally set `GLOW_RAY_TMP` (short absolute path, writable from where Python runs) to move Ray's session directory off `/tmp`, and cap `OMP_NUM_THREADS` to match `client_resources`' `num_cpus`.
 
-> Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_strategy.py](custom_strategies/GLow_strategy.py).
+> Note: This modifications are addressed in [flwr_lib_modifications/aggregate.py](flwr_lib_modifications/aggregate.py), and added to [custom_strategies/GLow_vanilla.py](custom_strategies/GLow_vanilla.py).
 
 
 ## Authors

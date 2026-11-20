@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 import sys
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, Subset, ConcatDataset
 from torchvision import transforms, utils
 import os
 from itertools import chain
@@ -96,6 +96,81 @@ def get_ton_iot(seed: int, data_path: str = ".datasets/TON_IOT_train_test_datase
 
     return trainset, trainset, testset
 
+HAR_ACTIVITIES = {  # label -> file names it may appear under
+    0: ['walking'], 1: ['running'], 2: ['sitting'], 3: ['standing'],
+    4: ['lying'], 5: ['stairsup', 'climbingup'], 6: ['stairsdown', 'climbingdown'], 7: ['jumping'],
+}
+
+class HAR(torch.utils.data.Dataset):
+    """Sensor windows `x` (N, seq_len, 6) with `.targets` (activity label) and
+    `.subjects` (subject id) per item, in __getitem__ order -- `.targets`
+    as the split_* partitioners expect, `.subjects` for
+    split_subject_train_subject_test."""
+
+    def __init__(self, x, targets, subjects):
+        self.x = torch.tensor(x, dtype=torch.float32)
+        self.targets = np.asarray(targets, dtype=np.int64)
+        self.subjects = np.asarray(subjects, dtype=np.int64)
+        self.y = torch.from_numpy(self.targets)
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
+
+def _har_windows(x, seq_len):
+    """Windows of `seq_len` timesteps with 50% overlap over one recording."""
+    step = seq_len // 2
+    return [x[i:i + seq_len] for i in range(0, len(x) - seq_len + 1, step)]
+
+def get_har(seed: int, data_path: str = ".datasets/dati_realworld/", seq_len: int = 128, test_ratio: float = 0.2):
+    """RealWorld HAR, forearm accelerometer: one folder per subject
+    (`subject_<id>/acc_<activity>_forearm.csv`, upperarm as fallback).
+    Per subject: x/y/z z-scored, windows cut per recording (a window never
+    spans two activities), 3 zero channels padded to match HARModel's 6 input
+    channels, then a stratified `test_ratio` of its windows held out as test.
+    Subject ids are numbered 0..S-1 in numeric folder order."""
+    from sklearn.model_selection import train_test_split
+
+    subject_dirs = sorted(
+        (d for d in os.listdir(data_path) if os.path.isdir(os.path.join(data_path, d))),
+        key=lambda d: int(d.split('_')[-1]),
+    )
+    train_parts, test_parts = [], []
+    for subject_id, subject_dir in enumerate(subject_dirs):
+        recordings = []
+        for label, names in HAR_ACTIVITIES.items():
+            for name in names:
+                path = next((os.path.join(data_path, subject_dir, f"acc_{name}_{loc}.csv") for loc in ('forearm', 'upperarm')
+                             if os.path.exists(os.path.join(data_path, subject_dir, f"acc_{name}_{loc}.csv"))), None)
+                if path is not None:
+                    recordings.append((label, pd.read_csv(path)[['attr_x', 'attr_y', 'attr_z']].to_numpy(dtype=np.float32)))
+                    break
+        if not recordings:
+            continue
+
+        all_x = np.concatenate([x for _, x in recordings])
+        mean, std = all_x.mean(axis=0), all_x.std(axis=0) + 1e-8
+        windows, labels = [], []
+        for label, x in recordings:
+            w = _har_windows((x - mean) / std, seq_len)
+            windows += w
+            labels += [label] * len(w)
+        windows = np.stack(windows)
+        windows = np.concatenate([windows, np.zeros_like(windows)], axis=2)
+        labels = np.array(labels)
+
+        train_idx, test_idx = train_test_split(
+            np.arange(len(labels)), test_size=test_ratio, random_state=seed, stratify=labels
+        )
+        train_parts.append((windows[train_idx], labels[train_idx], [subject_id] * len(train_idx)))
+        test_parts.append((windows[test_idx], labels[test_idx], [subject_id] * len(test_idx)))
+
+    join = lambda parts: HAR(*(np.concatenate([p[i] for p in parts]) for i in range(3)))
+    trainset, testset = join(train_parts), join(test_parts)
+    return trainset, trainset, testset
+
 def _get_dataset(dataset: str, seed: int):
     if dataset == 'cifar':
         return get_cifar10()
@@ -103,7 +178,9 @@ def _get_dataset(dataset: str, seed: int):
         return get_mnist()
     if dataset == 'tiot':
         return get_ton_iot(seed)
-    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist' or 'tiot'.")
+    if dataset == 'har':
+        return get_har(seed)
+    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist', 'tiot' or 'har'.")
 
 
 def _clients_with_data(num_clients: int, clients_with_no_data: list[int]) -> list[int]:
@@ -618,3 +695,66 @@ def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_
         )
 
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
+
+def split_subject_train_subject_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
+    """Natural per-subject split for datasets that record who produced each
+    sample (`.subjects`, e.g. 'har'): the k-th client with data gets subject
+    k's train windows (minus a `val_ratio` validation share) and subject k's
+    own test windows. Needs exactly one subject per client with data."""
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+
+    trainset, trainset_eval, testset = _get_dataset(dataset, seed)
+    if not hasattr(trainset, 'subjects'):
+        raise ValueError(f"split_subject_train_subject_test needs a dataset with per-sample subjects; '{dataset}' has none.")
+
+    clients_with_data = _clients_with_data(num_clients, clients_with_no_data)
+    num_subjects = len(np.unique(trainset.subjects))
+    if len(clients_with_data) != num_subjects:
+        raise ValueError(
+            f"'{dataset}' has {num_subjects} subjects but the topology has {len(clients_with_data)} "
+            "clients with data -- adjust num_clients / clients_with_no_data."
+        )
+
+    class_client_matrix_train = np.zeros((num_clients, num_classes), dtype=int)
+    class_client_matrix_test = np.zeros((num_clients, num_classes), dtype=int)
+    labels_train = np.array(trainset.targets)
+    labels_test = np.array(testset.targets)
+    subject_of = {client_id: subject for subject, client_id in enumerate(clients_with_data)}
+
+    trainloaders = []
+    validationloaders = []
+    testloaders = []
+
+    for client_id in range(num_clients):
+        subject = subject_of.get(client_id)
+        train_indices = np.flatnonzero(trainset.subjects == subject) if subject is not None else np.array([], dtype=int)
+        test_indices = np.flatnonzero(testset.subjects == subject) if subject is not None else np.array([], dtype=int)
+
+        trainloader, valloader = _client_train_val_loaders(
+            train_indices, trainset, trainset_eval, val_ratio, batch_size, seed
+        )
+        trainloaders.append(trainloader)
+        validationloaders.append(valloader)
+        testloaders.append(_client_test_loader(test_indices, testset, batch_size, seed))
+
+        class_client_matrix_train[client_id] = np.bincount(labels_train[train_indices], minlength=num_classes)
+        class_client_matrix_test[client_id] = np.bincount(labels_test[test_indices], minlength=num_classes)
+
+    return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
+
+def build_global_testloader(testloaders, batch_size: int, seed: int, fraction: float = 0.2):
+    """Global test set for GLow_gossip: a random
+    `fraction` of every distinct node test set, concatenated. Distinct by
+    dataset object, so *_common_test splits (one shared loader) contribute
+    once. Dataless nodes ('') are skipped."""
+    generator = torch.Generator().manual_seed(seed)
+    parts, seen = [], set()
+    for loader in testloaders:
+        if loader == '' or id(loader.dataset) in seen:
+            continue
+        seen.add(id(loader.dataset))
+        n = len(loader.dataset)
+        k = max(1, int(n * fraction))
+        parts.append(Subset(loader.dataset, torch.randperm(n, generator=generator)[:k].tolist()))
+    return DataLoader(ConcatDataset(parts), batch_size=batch_size, shuffle=False)

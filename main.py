@@ -15,7 +15,7 @@ import numpy as np
 
 import yaml
 
-from datasets import split_iid_train_common_test, split_niid_train_common_test, split_class_niid_train_common_test, split_class_niid_train_niid_test, split_iid_train_iid_test, split_niid_train_iid_test, split_niid_train_niid_test
+from datasets import split_iid_train_common_test, split_niid_train_common_test, split_class_niid_train_common_test, split_class_niid_train_niid_test, split_iid_train_iid_test, split_niid_train_iid_test, split_niid_train_niid_test, split_subject_train_subject_test, build_global_testloader
 from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average,
 from server import get_on_fit_config, get_evaluate_fn
 
@@ -25,7 +25,9 @@ from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.client_manager import ClientManager, SimpleClientManager
 from flwr.simulation import run_simulation
 
-from custom_strategies.GLow_strategy import GLow_strategy
+from custom_strategies.GLow_vanilla import GLow_vanilla
+from custom_strategies.GLow_gossip import GLow_gossip
+from custom_strategies.GLow_NAvg import GLow_NAvg
 
 # silence Flower's per-round INFO logging, keep WARNING/ERROR
 logging.getLogger("flwr").setLevel(logging.WARNING)
@@ -103,8 +105,8 @@ def main():
         head_switch_down.append(as_list(client_runtime['down']))
         head_switch_up.append(as_list(client_runtime['up']))
         head_switch_malicious.append(as_list(client_runtime['malicious']))
-        head_switch_random.append(as_list(client_runtime.get('random')))  # older runtime files lack it
-        head_switch_sl.append(as_list(client_runtime.get('sl')))  # older runtime files lack it
+        head_switch_random.append(as_list(client_runtime['random']))
+        head_switch_sl.append(as_list(client_runtime['sl']))
         head_status.append(client_runtime['status'])
         head_nature.append(client_runtime['nature'])
     
@@ -123,13 +125,15 @@ def main():
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_iid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
     elif cfg['split_dataset'] == 'split_niid_train_niid_test':
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_niid_train_niid_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'], cfg['alpha'])
+    elif cfg['split_dataset'] == 'split_subject_train_subject_test':
+        trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_subject_train_subject_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     else:
         raise ValueError(
             f"Unknown split_dataset '{cfg['split_dataset']}'. Expected one of: "
             "'split_iid_train_common_test', 'split_niid_train_common_test', "
             "'split_class_niid_train_common_test', 'split_class_niid_train_niid_test', "
             "'split_iid_train_iid_test', 'split_niid_train_iid_test', "
-            "'split_niid_train_niid_test'."
+            "'split_niid_train_niid_test', 'split_subject_train_subject_test'."
         )
 
     # 3. DEFINE YOUR CLIENTS
@@ -137,7 +141,7 @@ def main():
 
 
     # 4. DEFINE A STRATEGY
-    strategy = GLow_strategy(
+    strategy_kwargs = dict(
         topology=topology,
         aggregation=cfg['aggregation'],
         fraction_fit=0.00001,
@@ -163,8 +167,23 @@ def main():
         warmup_rounds = cfg['warmup_rounds'],
         warmup_epochs = cfg['warmup_epochs'],
         dataset = cfg['dataset'],
-        validationloaders = validationloaders,
     )
+
+    strategy_name = cfg['strategy']
+    if strategy_name == 'vanilla':
+        strategy = GLow_vanilla(**strategy_kwargs)
+    elif strategy_name in ('gossip', 'navg'):
+        global_testloader = build_global_testloader(testloaders, cfg['batch_size'], cfg['seed'])
+        strategy_kwargs.update(
+            train_mode=cfg['train_mode'],
+            evaluate_global_fn=get_evaluate_fn(cfg['num_classes'], [global_testloader] * num_clients, cfg['dataset']),
+        )
+        if strategy_name == 'gossip':
+            strategy = GLow_gossip(**strategy_kwargs, num_gossip_iterations=cfg['num_gossip_iterations'])
+        else:
+            strategy = GLow_NAvg(**strategy_kwargs, share_with_neighbors=cfg['share_with_neighbors'])
+    else:
+        raise ValueError(f"Unknown strategy '{strategy_name}'. Expected 'vanilla', 'gossip' or 'navg'.")
 
     server_config = ServerConfig(num_rounds=cfg['num_rounds'])
 

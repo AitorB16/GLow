@@ -31,7 +31,7 @@ import flwr
 import numpy as np
 from collections import OrderedDict
 import torch
-from models import build_model, test
+from models import build_model
 
 from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -71,10 +71,12 @@ than or equal to the values of `min_fit_clients` and `min_evaluate_clients`.
 
 
 # pylint: disable=line-too-long
-class GLow_strategy(Strategy):
+class GLow_vanilla(Strategy):
     """Decentralized gossip-learning strategy. https://www.sciencedirect.com/science/article/pii/S074373152600050X
     See module docstring for the rotating-head mechanic.
     """
+
+    name = 'vanilla'
 
     # pylint: disable=too-many-arguments,too-many-instance-attributes, line-too-long
     def __init__(
@@ -116,7 +118,6 @@ class GLow_strategy(Strategy):
         warmup_rounds: Optional[int] = None,
         warmup_epochs: int = 15,
         dataset: str = 'mnist',
-        validationloaders: Optional[List] = None,
     ) -> None:
         super().__init__()
 
@@ -177,12 +178,6 @@ class GLow_strategy(Strategy):
         self._last_central = {}
         self._last_distr = {}
         self.round_log = []
-        # approach_2b: the head measures every neighbour on its own val set -- assume validationloaders exist...
-        self.validationloaders = validationloaders
-        self.val_has_class = []
-        for loader in validationloaders:
-            present = set() if loader == '' else {int(c) for _, labels in loader for c in labels.unique()}
-            self.val_has_class.append([c in present for c in range(num_classes)])
         
         
         # per-node list of neighbour accuracies/params
@@ -245,11 +240,12 @@ class GLow_strategy(Strategy):
 
     def select_head(self):
         """Rotate to this round's head (next node in client_list, whatever its
-        status: a 'down' head wastes the round) and advance current_round."""
+        status: a 'down' head wastes the round), advance current_round and
+        apply the runtime schedule for it (server round r -> index r-1)."""
         self.selected_head = self.client_list[0]
-        self.head_check()
         self.client_list = np.roll(self.client_list, -1).tolist()
         self.current_round += 1
+        self.head_check()
         if self.current_round % self.min_available_clients == 0:
             self.cur_glob_round += 1
 
@@ -291,6 +287,7 @@ class GLow_strategy(Strategy):
                 self.initial_parameters[index] = client.get_parameters(ins=ins, timeout=None, group_id=0).parameters
                 self.head_parameters[index] = self.initial_parameters[index]
 
+        self.current_round = -1
         self.select_head()
         self.client_list = np.roll(self.client_list, 1).tolist()
         initial_parameters = self.initial_parameters[self.selected_head]
@@ -458,6 +455,8 @@ class GLow_strategy(Strategy):
                 config = self.on_fit_config_fn(server_round)
             if self.aggregation == 'approach_2b' and index != self.selected_head:
                 config['head_params'] = head_params
+            config['strategy'] = self.name
+            config['aggregation'] = self.aggregation
             # neighbour ids JSON-encoded -- legacy config bridge only allows scalars
             config['neighbors'] = json.dumps(connections)
             config['head_cid'] = self.selected_head
@@ -567,8 +566,7 @@ class GLow_strategy(Strategy):
         elif self.aggregation == 'approach_2':
             aggregated_ndarrays = aggregate_score_centroids_2(results_by_index, up_neighbours, self.selected_head, self.current_round, self.class_client_matrix_train, self.num_classes, 0.4, 0.6, 0.)
         elif self.aggregation == 'approach_2b':
-            conf_head_val = {n: self._recall_on_head_val(fit_res, server_round, n) for n, fit_res in results_by_index.items()}
-            aggregated_ndarrays = aggregate_score_centroids_2b(results_by_index, up_neighbours, self.selected_head, conf_head_val, self.val_has_class[self.selected_head], self.class_client_matrix_train, self.num_classes)
+            aggregated_ndarrays = aggregate_score_centroids_2b(results_by_index, up_neighbours, self.selected_head, self.class_client_matrix_train, self.num_classes)
         else:
             raise ValueError(
                 f"Unknown aggregation strategy '{self.aggregation}'. Expected one of: "
@@ -596,19 +594,6 @@ class GLow_strategy(Strategy):
         self.history.add_metrics_distributed_fit(server_round=server_round, metrics=metrics_aggregated)
 
         return parameters_aggregated, metrics_aggregated
-
-    def _recall_on_head_val(self, fit_res, server_round, node):
-        """approach_2b: per-class recall of `node`'s returned parameters on
-        the head's val set (zeros if the head has no val data)."""
-        loader = self.validationloaders[self.selected_head]
-        if loader == '':
-            return np.zeros(self.num_classes)
-        torch.manual_seed(self._round_seed(server_round, node))
-        net = build_model(self.dataset, self.num_classes)
-        state = zip(net.state_dict().keys(), parameters_to_ndarrays(fit_res.parameters))
-        net.load_state_dict(OrderedDict({k: torch.tensor(v) for k, v in state}), strict=True)
-        _, _, recall, _ = test(net, loader, self.num_classes, self.head_nature[self.selected_head], torch.device('cpu'))
-        return recall.numpy().astype(float)
 
     def aggregate_evaluate(
         self,

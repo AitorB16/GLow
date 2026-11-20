@@ -4,6 +4,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h1:
@@ -11,6 +12,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
 
@@ -19,6 +21,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h3:
@@ -26,6 +29,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h4:
@@ -33,6 +37,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h5:
@@ -40,6 +45,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h6:
@@ -47,6 +53,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h7:
@@ -54,6 +61,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h8:
@@ -61,6 +69,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h9:
@@ -68,6 +77,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h10:
@@ -75,6 +85,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h11:
@@ -82,6 +93,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
 
@@ -90,6 +102,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h13:
@@ -97,6 +110,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h14:
@@ -104,6 +118,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h15:
@@ -111,6 +126,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h16:
@@ -118,6 +134,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h17:
@@ -125,6 +142,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h18:
@@ -132,6 +150,7 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty
   h19:
@@ -139,5 +158,6 @@ heads:
     up:
     malicious:
     random:
+    sl:
     status: up #up, down
     nature: OK #OK, malicious, random, empty

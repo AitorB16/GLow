@@ -16,7 +16,7 @@
 # ==============================================================================
 """Aggregation functions vendored from `flwr.server.strategy.aggregate`,
 extended with GLow's trust-weighted strategies, dispatched by
-GLow_strategy.aggregate_fit() via `self.aggregation`:
+GLow_vanilla.aggregate_fit() via `self.aggregation`:
 
 - `aggregate_inplace` ('inplace'): plain sample-count-weighted average.
 - `aggregate_score`/`aggregate_score_validation`: weight by each
@@ -167,7 +167,8 @@ def aggregate_score_centroids_2(
     size**gamma` per neighbour, normalized per class then summed and
     renormalized into one weight per neighbour. `distance` is Euclidean
     distance between head/neighbour mean predicted-probability vectors per
-    class (`prob_matrix`)."""
+    class (`prob_matrix`). `confidence` is the node's recall on its own val
+    set where that set has the class, else its recall on the head's val set."""
 
     #log(INFO, "Strategy Aggregation for Head Client %s - Neighbours %s - (Round %s)", head_id, neighbours, current_round)
     eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
@@ -186,14 +187,9 @@ def aggregate_score_centroids_2(
 
     # CONFIDENCE -- crosses the wire JSON-encoded (legacy config bridge)
     v_conf = np.zeros((len(present_neighbours), class_number))
-    head_confidence_data = json.loads(metrics_map[head_id].get('confidence_score', '[]'))
-
     for j, neighbour in enumerate(present_neighbours):
-        if neighbour == head_id:
-            v_conf[j]=head_confidence_data
-        else:
-            raw = metrics_map[neighbour].get('confidence_score')
-            v_conf[j] = json.loads(raw) if raw is not None else 0.5
+        m = metrics_map[neighbour]
+        v_conf[j] = np.where(json.loads(m['own_val_has']), json.loads(m['recall_own']), json.loads(m['recall_head']))
 
     # SIZE -- normalized by total across neighbours per class
     v_norm_size = []
@@ -268,8 +264,6 @@ def aggregate_score_centroids_2b(
     results: Dict[int, FitRes],
     neighbours: List[int],
     head_id: int,
-    conf_head_val: Dict[int, NDArray],
-    head_val_has: List[bool],
     class_client_matrix: List[List[int]],
     class_number: int,
     alpha: float = 0.4,
@@ -283,30 +277,29 @@ def aggregate_score_centroids_2b(
     distance[n][c]: `dist_N` reported by n (L2 between its and the head's
       mean-softmax rows on n's own val set), gated on train-set class
       coverage as in approach_2.
-    confidence[n][c]: recall of n's parameters on the head's val set
-      (`conf_head_val`, measured by the head); for classes absent from the
-      head's val set it falls back to n's self-reported recall `conf_own`.
+    confidence[n][c]: n's recall on the head's val set (`recall_head`); for
+      classes absent from the head's val set it falls back to n's recall on
+      its own val set (`recall_own`).
     score = distance**alpha * confidence**beta, normalized per class, summed,
     renormalized into one weight per neighbour."""
 
     if head_id not in results:
         raise ValueError(f"Head {head_id}'s own fit() result is missing -- cannot aggregate without it.")
     ordered = [(n, results[n]) for n in neighbours if n in results]
-    head_checks = np.asarray(head_val_has)
+    head_checks = np.array(json.loads(results[head_id].metrics['own_val_has']))
     head_has = np.array(class_client_matrix[head_id]) > 0
-
-    def reported(fit_res, key):
-        return np.maximum(np.array(json.loads(fit_res.metrics[key]), dtype=float), 0.)  # -1 = no samples
 
     v_conf = np.zeros((len(ordered), class_number))
     v_distance = np.ones((len(ordered), class_number))
     for i, (n, fit_res) in enumerate(ordered):
+        m = fit_res.metrics
+        recall_head = np.array(json.loads(m['recall_head']))
         if n == head_id:
-            v_conf[i] = conf_head_val[n]
+            v_conf[i] = recall_head
             continue
         n_has = np.array(class_client_matrix[n]) > 0
-        v_conf[i] = np.where(head_checks, conf_head_val[n], reported(fit_res, 'conf_own'))
-        v_distance[i] = np.where(head_has & n_has, reported(fit_res, 'dist_N'), ~head_has & n_has)
+        v_conf[i] = np.where(head_checks, recall_head, json.loads(m['recall_own']))
+        v_distance[i] = np.where(head_has & n_has, json.loads(m['dist_N']), ~head_has & n_has)
 
     raw_score = (v_distance ** alpha) * (v_conf ** beta)
     raw_score_sum = raw_score.sum(axis=0)

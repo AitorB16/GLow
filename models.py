@@ -1,6 +1,6 @@
 """Model architecture and plain-PyTorch train/eval routines used by
 client.py. Nothing here is FL-specific -- the gossip logic (head/neighbour
-roles, aggregation) lives in custom_strategies/GLow_strategy.py and
+roles, aggregation) lives in custom_strategies/GLow_vanilla.py and
 client.py.
 """
 
@@ -84,17 +84,41 @@ class ScratchNet(nn.Module):
       x = F.relu(self.fc5(x))
       return self.fc6(x)
 
+#HAR
+class HARModel(nn.Module):
+    """1-D CNN over (seq_len=128, 6) sensor windows (see get_har): one conv
+    over time, max-pool, two fully connected layers."""
+    def __init__(self, num_classes: int = 8) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv1d(in_channels=6, out_channels=192, kernel_size=16)
+        self.pool = nn.MaxPool1d(kernel_size=4)
+        self.dropout = nn.Dropout(0.5)
+        self.fc1 = nn.Linear(192 * 28, 1024)  # (128 - 16 + 1) // 4 = 28
+        self.fc2 = nn.Linear(1024, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(0, 2, 1)  # (batch, seq_len, channels) -> (batch, channels, seq_len)
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        x = self.dropout(x)
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
+
 def build_model(dataset: str, num_classes: int) -> nn.Module:
     """Architecture for `dataset`: LeNet (3-channel, CIFAR), LeNet5 (1-channel,
-    MNIST) or ScratchNet (22 tabular features, TON_IoT). Single source of truth
-    -- client, server and strategy all build models through here."""
+    MNIST), ScratchNet (22 tabular features, TON_IoT) or HARModel (sensor
+    windows, HAR). Single source of truth -- client, server and strategy all
+    build models through here."""
     if dataset == 'cifar':
         return LeNet(num_classes)
     if dataset == 'mnist':
         return LeNet5(num_classes)
     if dataset == 'tiot':
         return ScratchNet(num_classes)
-    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist' or 'tiot'.")
+    if dataset == 'har':
+        return HARModel(num_classes)
+    raise ValueError(f"Unknown dataset '{dataset}'. Expected 'cifar', 'mnist', 'tiot' or 'har'.")
 
 
 def corrupt_labels(labels, nature, num_classes):

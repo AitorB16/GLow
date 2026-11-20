@@ -1,5 +1,5 @@
 """The Flower client side of GLow's gossip learning: one FlowerClient per
-topology node. Every node runs the same client code; GLow_strategy tells each
+topology node. Every node runs the same client code; GLow_vanilla tells each
 one, per round, whether it's this round's "head" or one of its "neighbours"
 (see FlowerClient.fit()) -- there's no separate client/server role split like
 centralized FL has.
@@ -57,6 +57,13 @@ class FlowerClient(fl.client.NumPyClient):
     def get_properties(self, config: Dict[str, Scalar]) -> Dict[str, Scalar]:
         return {"partition_id": self.cid}
 
+    def _make_optimizer(self, config):
+        """Local optimizer from config_fit's `optimizer` ('adam', or 'sgd'
+        with config_fit's `momentum`)."""
+        if config['optimizer'] == 'sgd':
+            return torch.optim.SGD(self.model.parameters(), lr=config['lr'], momentum=config['momentum'])
+        return torch.optim.Adam(self.model.parameters(), lr=config['lr'])
+
     @staticmethod
     def _num_samples(loader):
         """Sample count, not batch count -- len(DataLoader) is the number of
@@ -80,125 +87,94 @@ class FlowerClient(fl.client.NumPyClient):
         else:
             epochs = config['local_epochs']
 
-        # Only the head trains this round -- neighbours just re-evaluate their
-        # existing stored parameters (below) and report those, untouched.
+        if config['strategy'] in ('gossip', 'navg'):
+            return self._fit_gossip(config, epochs)
+
+        # Only the head trains this round -- neighbours keep their stored
+        # parameters untouched and only measure them (epochs=0 runs train()'s
+        # validation pass alone, the same code path the head's accuracy and
+        # recall come from).
         is_head = config['head_cid'] == self.cid
+        aggregation = config['aggregation']
+        nature = config['nature']
 
-        training_time = 0.
-        if is_head:
-            optim = torch.optim.Adam(self.model.parameters(), lr=config['lr'])
-            _, metrics_val_distr, centroid, training_time = train(
-                self.model, self.trainloader, self.validationloader,
-                optim, epochs, self.num_classes, config['nature'], self.device
-            )
-        elif 'head_params' in config:  # approach_2b
-            return self._fit_approach_2b(config)
-
-        # Prob matrix always evaluated on head validation set
-        prob_matrix, _ = compute_prob_matrix(
-            self.model, self.validation_loaders[config['head_cid']],
-            self.num_classes, config['nature'], self.device
+        optim = self._make_optimizer(config) if is_head else None
+        _, metrics_val_distr, recall_own, training_time = train(
+            self.model, self.trainloader, self.validationloader,
+            optim, epochs if is_head else 0, self.num_classes, nature, self.device
         )
-
-        if is_head:
-            centroid_json = json.dumps(centroid.tolist())
-            confidence_score_json = centroid_json  # head reports its own centroid as its confidence too
-        elif self.cid in json.loads(config['neighbors']):
-            confidence_score, metrics_val_distr = self._neighbour_confidence_score(config)
-            centroid_json = json.dumps([])
-            confidence_score_json = json.dumps(confidence_score.tolist())
-        else:
-            raise ValueError(
-                f"Client {self.cid} was asked to fit() but is neither this round's "
-                f"head ({config['head_cid']}) nor listed among its neighbours "
-                f"({config['neighbors']}) -- should be unreachable given how "
-                "configure_fit() samples clients."
-            )
-
+        if not is_head:
+            training_time = 0.
         if self._num_samples(self.validationloader) == 0:
             metrics_val_distr = 0.
 
+        metrics = {
+            'acc_val_distr': metrics_val_distr,
+            'cid': self.cid,
+            'centroid': json.dumps(recall_own.tolist() if is_head else []),
+            'prob_matrix': json.dumps([]),
+            'training_time': training_time,
+            'HEAD': 'YES' if is_head else 'NO',
+        }
+
+        # Raw per-class signals for the approach_2 / approach_2b aggregators,
+        # which combine them (see flwr_lib_modifications/aggregate.py).
+        if aggregation in ('approach_2', 'approach_2b'):
+            head_val = self.validation_loaders[config['head_cid']]
+            recall_head = recall_own if is_head else test(self.model, head_val, self.num_classes, nature, self.device)[2]
+            metrics['recall_own'] = json.dumps(recall_own.tolist())
+            metrics['recall_head'] = json.dumps(recall_head.tolist())
+            metrics['own_val_has'] = json.dumps([count > 0 for count in self.val_counts])
+        if aggregation == 'approach_2':
+            prob_matrix, _ = compute_prob_matrix(self.model, head_val, self.num_classes, nature, self.device)
+            metrics['prob_matrix'] = json.dumps(prob_matrix.flatten().tolist())
+        if aggregation == 'approach_2b' and not is_head:
+            metrics['dist_N'] = json.dumps(self._softmax_distance_to_head(config['head_params'], nature))
+
+        return self.get_parameters({}), self._num_samples(self.trainloader), metrics
+
+    def _fit_gossip(self, config, epochs):
+        """GLow_gossip / GLow_NAvg fit() reply: plain local training on this node's own
+        data (its own `nature`); gossip itself happens in the strategy.
+        Returns the keys cli_val_distr() expects."""
+        optim = self._make_optimizer(config)
+        _, metrics_val_distr, _, training_time = train(
+            self.model, self.trainloader, self.validationloader,
+            optim, epochs, self.num_classes, config['nature'], self.device
+        )
+        if self._num_samples(self.validationloader) == 0:
+            metrics_val_distr = 0.
         return self.get_parameters({}), self._num_samples(self.trainloader), {
             'acc_val_distr': metrics_val_distr,
             'cid': self.cid,
-            'centroid': centroid_json,
-            'confidence_score': confidence_score_json,
-            'prob_matrix': json.dumps(prob_matrix.flatten().tolist()),
-            'training_time': training_time,
-            'HEAD': 'YES' if is_head else 'NO',
-            'distr_val_loss': '##',
-            'energy used': '10W',
-        }
-
-    def _fit_approach_2b(self, config):
-        """approach_2b fit() reply for a non-head node. Confidence on the
-        head's val set is measured by the head (GLow_strategy); this node
-        reports, on its OWN val set, `dist_N` (per-class L2 between its and the
-        head's mean-softmax rows, the head being `config['head_params']`) and
-        `conf_own` (its per-class recall, the head's fallback for classes its
-        own val set lacks). -1 where this node has no samples of a class."""
-        C, nature = self.num_classes, config['nature']
-        acc, dist_N, conf_own = 0., [-1.] * C, [-1.] * C
-        if self._num_samples(self.validationloader) > 0:
-            _, acc, recall, _ = test(self.model, self.validationloader, C, nature, self.device)
-            own_prob, _ = compute_prob_matrix(self.model, self.validationloader, C, nature, self.device)
-            with np.load(io.BytesIO(config['head_params'])) as f:
-                head_params = [f[f'arr_{i}'] for i in range(len(f.files))]
-            head_model = copy.deepcopy(self.model)
-            head_model.load_state_dict(OrderedDict(
-                {k: torch.tensor(v) for k, v in zip(head_model.state_dict().keys(), head_params)}), strict=True)
-            head_prob, _ = compute_prob_matrix(head_model, self.validationloader, C, nature, self.device)
-            dist = torch.linalg.norm(own_prob - head_prob, dim=1)
-            has = own_prob.sum(dim=1) > 0
-            dist_N = [float(dist[c]) if has[c] else -1. for c in range(C)]
-            conf_own = [float(recall[c]) if has[c] else -1. for c in range(C)]
-
-        return self.get_parameters({}), self._num_samples(self.trainloader), {
-            'acc_val_distr': acc,
-            'cid': self.cid,
             'centroid': json.dumps([]),
-            'dist_N': json.dumps(dist_N),
-            'conf_own': json.dumps(conf_own),
             'prob_matrix': json.dumps([]),
-            'training_time': 0.,
-            'HEAD': 'NO',
-            'distr_val_loss': '##',
-            'energy used': '10W',
+            'training_time': training_time,
+            'HEAD': 'YES' if config['head_cid'] == self.cid else 'NO',
         }
 
-    def _neighbour_confidence_score(self, config):
-        """Returns (confidence_score, val_accuracy) for a non-head node.
-
-        Per-class confidence: this neighbour's own centroid where it has local
-        validation data for that class, else its performance on the head's
-        validation set. Both measured against the SAME (untrained-this-round)
-        parameters, since a neighbour doesn't train when it's not head.
-
-        `epochs=0` runs train()'s validation pass and skips the epoch loop, so
-        the accuracy a neighbour reports comes from exactly the code path the
-        head uses, on its own validation split -- never the test partition,
-        which clients are not given at all."""
-        _, val_accuracy, neighbour_centroid, _ = train(
-            self.model, self.trainloader, self.validationloader,
-            None, 0, self.num_classes, config['nature'], self.device
-        )
-        _, _, head_centroid, _ = test(
-            self.model, self.validation_loaders[config['head_cid']],
-            self.num_classes, config['nature'], self.device
-        )
-        neighbour_centroid = neighbour_centroid.detach().cpu().numpy()
-        head_centroid = head_centroid.detach().cpu().numpy()
-        confidence_score = np.array([
-            head_centroid[c] if self.val_counts[c] == 0 else neighbour_centroid[c]
-            for c in range(self.num_classes)
-        ])
-        return confidence_score, val_accuracy
+    def _softmax_distance_to_head(self, head_params_bytes, nature):
+        """approach_2b `dist_N`: per class, L2 distance between this node's and
+        the head's mean-softmax rows on this node's own val set (0 where the
+        val set has no samples of the class, after label corruption)."""
+        if self._num_samples(self.validationloader) == 0:
+            return [0.] * self.num_classes
+        with np.load(io.BytesIO(head_params_bytes)) as f:
+            head_params = [f[f'arr_{i}'] for i in range(len(f.files))]
+        head_model = copy.deepcopy(self.model)
+        head_model.load_state_dict(OrderedDict(
+            {k: torch.tensor(v) for k, v in zip(head_model.state_dict().keys(), head_params)}), strict=True)
+        own_prob, _ = compute_prob_matrix(self.model, self.validationloader, self.num_classes, nature, self.device)
+        head_prob, _ = compute_prob_matrix(head_model, self.validationloader, self.num_classes, nature, self.device)
+        dist = torch.linalg.norm(own_prob - head_prob, dim=1)
+        has = own_prob.sum(dim=1) > 0
+        return [float(dist[c]) if has[c] else 0. for c in range(self.num_classes)]
 
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         """Distributed-evaluation phase (separate from fit()'s training
         round): loads `parameters` as-is (no local training) and scores them
         against this client's own validation set -- used by
-        GLow_strategy.aggregate_evaluate() to track each node's standalone
+        GLow_vanilla.aggregate_evaluate() to track each node's standalone
         accuracy/F1 over time, independent of who was head."""
         torch.manual_seed(config['seed'])
         self.set_parameters(parameters)
@@ -228,7 +204,7 @@ def cli_eval_distr_results(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[
 
 def cli_val_distr(metrics: List[Tuple[int, Dict[str, float]]]) -> Dict[str, List]:
     """Same as `cli_eval_distr_results` but for fit()'s validation metrics
-    (`acc_val_distr`/`centroid`/`prob_matrix`) -- GLow_strategy needs each
+    (`acc_val_distr`/`centroid`/`prob_matrix`) -- GLow_vanilla needs each
     client's own values individually for trust-weighted aggregation, not a
     blended average."""
     acc = []

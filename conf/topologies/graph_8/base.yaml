@@ -1,7 +1,11 @@
 run_name: 'graph_8'
-dataset: 'mnist' #'cifar', 'mnist', 'tiot'
-aggregation: 'inplace' #'inplace', 'score', 'score_validation', 'approach_2', 'krum'
-split_dataset: 'split_iid_train_common_test' #'split_iid_train_common_test', 'split_niid_train_common_test', 'split_class_niid_train_common_test', 'split_class_niid_train_niid_test', 'split_iid_train_iid_test', 'split_niid_train_iid_test', 'split_niid_train_niid_test'
+strategy: 'vanilla' #'vanilla' (GLow_vanilla.py), 'gossip' (GLow_gossip.py), 'navg' (GLow_NAvg.py)
+train_mode: 'all' #gossip/navg only: 'all' (every active node trains), 'head_only' (only one node trains)
+num_gossip_iterations: 500 #gossip only: pairwise exchange attempts per round
+share_with_neighbors: True #navg only: neighbours also receive the head's average (False: only the head)
+dataset: 'mnist' #'cifar', 'mnist', 'tiot', 'har'
+aggregation: 'inplace' #vanilla only: 'inplace', 'score', 'score_validation', 'approach_2', 'approach_2b', 'krum', 'trimmed_mean'
+split_dataset: 'split_iid_train_common_test' #'split_iid_train_common_test', 'split_niid_train_common_test', 'split_class_niid_train_common_test', 'split_class_niid_train_niid_test', 'split_iid_train_iid_test', 'split_niid_train_iid_test', 'split_niid_train_niid_test', 'split_subject_train_subject_test' (one subject per node; 'har' only)
 alpha: 0.1 #Dirichlet: float for split_class_niid_*, one float per client for split_niid_*; unused by split_iid_*
 device: cpu
 num_rounds: 256
@@ -11,6 +15,7 @@ batch_size: 64
 num_classes: 10 #output layer size
 seed: 1999
 config_fit:
+  optimizer: 'adam' #'adam', 'sgd'
   lr: 0.0001
   momentum: 0.9
   local_epochs: 4
