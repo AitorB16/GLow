@@ -11,7 +11,7 @@ GLow is a novel Gossip Learning (GL) strategy for simulating fully distributed s
 
 ## Installation and Dependencies
 Built upon Flower 1.30.0 and setuptools v84.0.0 -- using Python 3.12.
-The simulator runs CPU-only: the simulated agents represent IoT-class devices, and a single device choice keeps runs reproducible across hosts.
+The simulator runs on CPU: the simulated agents represent IoT-class devices, and a single device choice keeps runs reproducible across hosts.
 As the [pyproject.toml](pyproject.toml) file is present, just run:
 ```sh 
 uv sync

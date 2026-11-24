@@ -6,7 +6,6 @@ centralized FL has.
 """
 
 import copy
-import io
 from collections import OrderedDict
 from typing import Dict, Tuple, List
 from flwr.common import Context, NDArrays, Scalar
@@ -15,7 +14,7 @@ import json
 import torch
 import numpy as np
 import flwr as fl
-from models import build_model, train, test, compute_prob_matrix
+from models import build_model, train, test, compute_prob_matrix, softmax_distance, unpack_ndarrays, load_weights
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 
@@ -129,7 +128,9 @@ class FlowerClient(fl.client.NumPyClient):
             prob_matrix, _ = compute_prob_matrix(self.model, head_val, self.num_classes, nature, self.device)
             metrics['prob_matrix'] = json.dumps(prob_matrix.flatten().tolist())
         if aggregation == 'approach_2b' and not is_head:
-            metrics['dist_N'] = json.dumps(self._softmax_distance_to_head(config['head_params'], nature))
+            head_model = copy.deepcopy(self.model)
+            load_weights(head_model, unpack_ndarrays(config['head_params']))
+            metrics['dist_N'] = json.dumps(softmax_distance(self.model, head_model, self.validationloader, self.num_classes, nature, self.device))
 
         return self.get_parameters({}), self._num_samples(self.trainloader), metrics
 
@@ -152,23 +153,6 @@ class FlowerClient(fl.client.NumPyClient):
             'training_time': training_time,
             'HEAD': 'YES' if config['head_cid'] == self.cid else 'NO',
         }
-
-    def _softmax_distance_to_head(self, head_params_bytes, nature):
-        """approach_2b `dist_N`: per class, L2 distance between this node's and
-        the head's mean-softmax rows on this node's own val set (0 where the
-        val set has no samples of the class, after label corruption)."""
-        if self._num_samples(self.validationloader) == 0:
-            return [0.] * self.num_classes
-        with np.load(io.BytesIO(head_params_bytes)) as f:
-            head_params = [f[f'arr_{i}'] for i in range(len(f.files))]
-        head_model = copy.deepcopy(self.model)
-        head_model.load_state_dict(OrderedDict(
-            {k: torch.tensor(v) for k, v in zip(head_model.state_dict().keys(), head_params)}), strict=True)
-        own_prob, _ = compute_prob_matrix(self.model, self.validationloader, self.num_classes, nature, self.device)
-        head_prob, _ = compute_prob_matrix(head_model, self.validationloader, self.num_classes, nature, self.device)
-        dist = torch.linalg.norm(own_prob - head_prob, dim=1)
-        has = own_prob.sum(dim=1) > 0
-        return [float(dist[c]) if has[c] else 0. for c in range(self.num_classes)]
 
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         """Distributed-evaluation phase (separate from fit()'s training

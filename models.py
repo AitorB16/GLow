@@ -4,6 +4,9 @@ roles, aggregation) lives in custom_strategies/GLow_vanilla.py and
 client.py.
 """
 
+import io
+from collections import OrderedDict
+
 import torch
 import torchmetrics
 import torch.nn as nn
@@ -243,7 +246,7 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
     matrices, row-indexed by true class: `prob_matrix` (mean softmax
     probability vector per true class -- the per-class distance signal
     `aggregate_score_centroids_2` uses) and `preds_matrix` (a confusion
-    matrix, currently unused by callers)."""
+    matrix, behind server.py's per-class results)."""
 
     instances_per_class = torch.zeros(num_classes)
     prob_matrix = torch.zeros((num_classes, num_classes))
@@ -276,3 +279,30 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
         prob_matrix[mask] /= instances_per_class[mask].unsqueeze(1)
 
     return prob_matrix, preds_matrix
+
+def softmax_distance(net, ref_net, loader, num_classes, nature, device):
+    """Per class, L2 distance between `net`'s and `ref_net`'s mean-softmax
+    rows on `loader` (0 for classes it holds no samples of, after label
+    corruption, or for an empty loader)."""
+    if loader == '':
+        return [0.] * num_classes
+    prob, _ = compute_prob_matrix(net, loader, num_classes, nature, device)
+    ref_prob, _ = compute_prob_matrix(ref_net, loader, num_classes, nature, device)
+    dist = torch.linalg.norm(prob - ref_prob, dim=1)
+    return [float(dist[c]) if prob[c].sum() > 0 else 0. for c in range(num_classes)]
+
+def pack_ndarrays(ndarrays) -> bytes:
+    """ndarrays -> one bytes value (Flower configs only take scalars)."""
+    buf = io.BytesIO()
+    np.savez(buf, *ndarrays)
+    return buf.getvalue()
+
+def unpack_ndarrays(blob: bytes):
+    """Inverse of pack_ndarrays."""
+    with np.load(io.BytesIO(blob)) as f:
+        return [f[f'arr_{i}'] for i in range(len(f.files))]
+
+def load_weights(net, ndarrays):
+    """Load a list of ndarrays (state_dict order) into `net`."""
+    net.load_state_dict(OrderedDict(
+        {k: torch.tensor(v) for k, v in zip(net.state_dict().keys(), ndarrays)}), strict=True)

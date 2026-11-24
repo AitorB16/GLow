@@ -22,7 +22,6 @@ going up/down/sl/malicious/random per round. A 'down' head wastes its round
 part in another head's round (aggregation).
 """
 
-import io
 import os
 import time
 import json
@@ -31,7 +30,7 @@ import flwr
 import numpy as np
 from collections import OrderedDict
 import torch
-from models import build_model
+from models import build_model, pack_ndarrays
 
 from logging import WARNING, INFO
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -444,9 +443,7 @@ class GLow_vanilla(Strategy):
         )
         if self.aggregation == 'approach_2b':
             # neighbours compute dist_N against the head's current (pre-training) params
-            buf = io.BytesIO()
-            np.savez(buf, *parameters_to_ndarrays(self.head_parameters[self.selected_head]))
-            head_params = buf.getvalue()
+            head_params = pack_ndarrays(parameters_to_ndarrays(self.head_parameters[self.selected_head]))
         pairs = []
         for client in clients:
             index = self._cid_to_index[client.cid]
