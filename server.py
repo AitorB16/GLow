@@ -1,26 +1,16 @@
-"""Factories for the two config/eval callbacks GLow_vanilla takes as
-constructor args (`on_fit_config_fn`, `evaluate_fn`) -- built once in
-main.py and called internally by the strategy every round.
-"""
+"""Fit-config and test-evaluation callbacks passed to the strategy by main.py."""
 
 from collections import OrderedDict
 from models import build_model, test, compute_prob_matrix
 import torch
 
 def get_on_fit_config(config):
-    """Returns the per-round `FitIns.config` builder GLow_vanilla calls in
-    configure_fit() (which layers additional keys like `head_cid`/`neighbors`
-    on top)."""
     optimizer = config['optimizer']
     if optimizer not in ('adam', 'sgd'):
         raise ValueError(f"Unknown optimizer '{optimizer}'. Expected 'adam' or 'sgd'.")
 
     def fit_config_fn(server_round: int):
-        '''Decrease the learning rate from a specific communication round on'''
-        #if server_round > 50:
-        #    lr = config['lr'] / 10
-        #else:
-        #    lr = config['lr']
+        # lr schedule, e.g.: lr = config['lr'] / 10 if server_round > 50 else config['lr']
         lr = config['lr']
         return {'lr': lr,
                 'optimizer': optimizer,
@@ -31,13 +21,9 @@ def get_on_fit_config(config):
     return fit_config_fn
 
 def get_evaluate_fn(num_classes: int, testloaders, dataset: str):
-    """Returns the `evaluate_fn(sid, server_round, parameters, config)`
-    GLow_vanilla.evaluate() calls each round to score `parameters` against
-    a specific node's own test set (`testloaders[sid]`) -- GLow's
-    "centralized"-style evaluation hook, indexed by `sid` since there's no
-    single global model in a gossip topology."""
+    """evaluate_fn(sid, ...) scores `parameters` on node `sid`'s test set."""
 
-    def evaluate_fn(sid: int, server_round: int, parameters, config): #int nparrays, dict
+    def evaluate_fn(sid: int, server_round: int, parameters, config):
         torch.manual_seed(config['seed'])
 
         model = build_model(dataset, num_classes)
@@ -47,9 +33,9 @@ def get_evaluate_fn(num_classes: int, testloaders, dataset: str):
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         model.load_state_dict(state_dict, strict=True)
 
-        loss, accuracy, _, macro_f1 = test(model, testloaders[sid], num_classes, config['nature'], device) #global model
-        _, preds_per_class = compute_prob_matrix(model, testloaders[sid], num_classes, config['nature'], device) # To compute centroids using neigh params in head val-set
+        loss, accuracy, _, macro_f1 = test(model, testloaders[sid], num_classes, config['nature'], device)
+        _, preds_per_class = compute_prob_matrix(model, testloaders[sid], num_classes, config['nature'], device)
 
-        return loss, {'acc_cntrl': accuracy, 'macro_f1': macro_f1, 'preds_per_class': preds_per_class.cpu().numpy()}
+        return loss, {'acc_test': accuracy, 'macro_f1_test': macro_f1, 'preds_per_class': preds_per_class.cpu().numpy()}
 
     return evaluate_fn

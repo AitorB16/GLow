@@ -1,8 +1,4 @@
-"""Model architecture and plain-PyTorch train/eval routines used by
-client.py. Nothing here is FL-specific -- the gossip logic (head/neighbour
-roles, aggregation) lives in custom_strategies/GLow_vanilla.py and
-client.py.
-"""
+"""Models and plain PyTorch train/test routines."""
 
 import io
 from collections import OrderedDict
@@ -16,8 +12,6 @@ import time
 
 #CIFAR
 class LeNet(nn.Module):
-    """3-conv-layer CNN sized for CIFAR10's 32x32x3 inputs, parameterized
-    only by `num_classes`."""
     def __init__(self, num_classes: int) -> None:
       super().__init__()
       self.conv1 = nn.Conv2d(3, 16, 3, 1, padding=1) # input is color image, hence 3 i/p channels. 16 filters, kernal size is tuned to 3 to avoid overfitting, stride is 1 , padding is 1 extract all edge features.
@@ -42,8 +36,6 @@ class LeNet(nn.Module):
 
 #MNIST
 class LeNet5(nn.Module):
-    """Classic LeNet-5 conv/tanh/maxpool architecture, parameterized only by
-    `num_classes` (MNIST uses 10)."""
     def __init__(self, num_classes):
         super().__init__()
         self.num_classes = num_classes
@@ -89,8 +81,6 @@ class ScratchNet(nn.Module):
 
 #HAR
 class HARModel(nn.Module):
-    """1-D CNN over (seq_len=128, 6) sensor windows (see get_har): one conv
-    over time, max-pool, two fully connected layers."""
     def __init__(self, num_classes: int = 8) -> None:
         super().__init__()
         self.conv1 = nn.Conv1d(in_channels=6, out_channels=192, kernel_size=16)
@@ -109,10 +99,6 @@ class HARModel(nn.Module):
         return self.fc2(x)
 
 def build_model(dataset: str, num_classes: int) -> nn.Module:
-    """Architecture for `dataset`: LeNet (3-channel, CIFAR), LeNet5 (1-channel,
-    MNIST), ScratchNet (22 tabular features, TON_IoT) or HARModel (sensor
-    windows, HAR). Single source of truth -- client, server and strategy all
-    build models through here."""
     if dataset == 'cifar':
         return LeNet(num_classes)
     if dataset == 'mnist':
@@ -125,9 +111,8 @@ def build_model(dataset: str, num_classes: int) -> nn.Module:
 
 
 def corrupt_labels(labels, nature, num_classes):
-    """Label noise by agent nature: 'malicious' shifts every class by one
-    (0->1, ..., 9->0); 'random' maps each class to a random one, redrawn per
-    batch; any other nature leaves labels untouched."""
+    """'malicious': class c -> c+1; 'random': random class map, redrawn per
+    batch; otherwise unchanged."""
     if nature == 'malicious':
         mapping = torch.roll(torch.arange(num_classes), -1)
     elif nature == 'random':
@@ -154,11 +139,10 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
             optimizer.step()
             optimizer.zero_grad()
             loss_sum += loss.item()
-        #print(f"\n** {_+1}/{epochs} mean loss: {loss_sum/len(trainloader)}\n")
         if len(trainloader) > 0:
             train_loss.append(loss_sum/len(trainloader))
         else:
-            train_loss.append(1./num_classes)
+            train_loss.append(float('nan'))
     end_event = time.perf_counter()
     training_time = end_event - start_event
 
@@ -192,8 +176,8 @@ def train(net, trainloader, validationloader, optimizer, epochs, num_classes, na
         val_accuracy = correct / total_size
         mask = instances_per_class > 0
         centroid[mask] /= instances_per_class[mask]
-    else: #Just in case no local data -- THIS CASE NEEDS FURTHER ADDRESSING
-        val_accuracy = 1. / num_classes
+    else: #no local data -- further address?
+        val_accuracy = float('nan')
     
     metrics_val_distributed_fit = val_accuracy
 
@@ -235,18 +219,13 @@ def test(net, testloader, num_classes, nature, device):
             macro_f1 = f1.compute().item()
             loss = loss / len(testloader)
         else:
-            accuracy = 1./num_classes
-            macro_f1 = 0.
-        #print(f"F1 scores: {macro_f1}\n")
+            loss = accuracy = macro_f1 = float('nan')
 
     return loss, accuracy, centroid, macro_f1
 
 def compute_prob_matrix(net, testloader, num_classes, nature, device):
-    """Evaluation-only pass returning two `(num_classes, num_classes)`
-    matrices, row-indexed by true class: `prob_matrix` (mean softmax
-    probability vector per true class -- the per-class distance signal
-    `aggregate_score_centroids_2` uses) and `preds_matrix` (a confusion
-    matrix, behind server.py's per-class results)."""
+    """Rows = true class. prob_matrix: mean softmax vector per class;
+    preds_matrix: confusion matrix."""
 
     instances_per_class = torch.zeros(num_classes)
     prob_matrix = torch.zeros((num_classes, num_classes))
@@ -281,9 +260,8 @@ def compute_prob_matrix(net, testloader, num_classes, nature, device):
     return prob_matrix, preds_matrix
 
 def softmax_distance(net, ref_net, loader, num_classes, nature, device):
-    """Per class, L2 distance between `net`'s and `ref_net`'s mean-softmax
-    rows on `loader` (0 for classes it holds no samples of, after label
-    corruption, or for an empty loader)."""
+    """Per class L2 distance between the two nets' mean softmax rows on
+    `loader` (0 for classes absent from it)."""
     if loader == '':
         return [0.] * num_classes
     prob, _ = compute_prob_matrix(net, loader, num_classes, nature, device)
@@ -292,17 +270,15 @@ def softmax_distance(net, ref_net, loader, num_classes, nature, device):
     return [float(dist[c]) if prob[c].sum() > 0 else 0. for c in range(num_classes)]
 
 def pack_ndarrays(ndarrays) -> bytes:
-    """ndarrays -> one bytes value (Flower configs only take scalars)."""
+    # Flower configs only take scalars, so send the arrays as bytes
     buf = io.BytesIO()
     np.savez(buf, *ndarrays)
     return buf.getvalue()
 
 def unpack_ndarrays(blob: bytes):
-    """Inverse of pack_ndarrays."""
     with np.load(io.BytesIO(blob)) as f:
         return [f[f'arr_{i}'] for i in range(len(f.files))]
 
 def load_weights(net, ndarrays):
-    """Load a list of ndarrays (state_dict order) into `net`."""
     net.load_state_dict(OrderedDict(
         {k: torch.tensor(v) for k, v in zip(net.state_dict().keys(), ndarrays)}), strict=True)

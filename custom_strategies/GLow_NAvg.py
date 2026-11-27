@@ -1,20 +1,16 @@
 """
-Neighbour-average variant of GLow, selected with `strategy: 'navg'` in
-base.yaml. Neighbour-average design originally by Andrea De Luna. Shares
-GLow_gossip's plumbing: per-node evaluation, <run_id>_gossip_tracking.csv,
-history (mean over active nodes) and outputs.
+Neighbour averaging (strategy: 'navg'), design by Andrea De Luna. Evaluation
+and outputs as in GLow_gossip.
 
-Each round (server_round r):
- 1. head_check() applies the runtime schedule for round index r-1.
- 2. The head rotates round-robin, (r-1) % num_clients. A 'down' head wastes
-    the round; an 'sl' head trains alone.
- 3. Participants: the head plus its 'up' neighbours in topology[head].
-    train_mode 'all' -> every participant trains; 'head_only' -> only the
-    head trains, neighbours contribute their stored parameters.
- 4. Outside warm-up, the participants' train-sample-weighted average goes to
-    the head and, with `share_with_neighbors`, to every participant that
-    lists the head in its own topology row (an isolated malicious/random node
-    is averaged in by others but never receives the average).
+Each round r:
+ 1. Apply the runtime schedule for round index r-1.
+ 2. Head = (r-1) % num_clients. A 'down' head wastes the round; an 'sl' head
+    trains alone.
+ 3. Participants: the head and its up neighbours. train_mode 'all': all of
+    them train; 'head_only': only the head, the rest send stored parameters.
+ 4. Outside warm-up, the train-sample-weighted average goes to the head and,
+    with `share_with_neighbors`, to every participant listing the head in its
+    topology row (an isolated malicious/random node never receives it).
 """
 
 import time

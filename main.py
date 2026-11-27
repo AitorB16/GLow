@@ -1,28 +1,23 @@
-"""Argv-driven entrypoint: `python3 main.py <base.yaml>
-<topology.yaml> <runtime.yaml> <run_id>` (invoked by sing/mult_exp.sh)."""
+"""Usage: python3 main.py <base.yaml> <topology.yaml> <runtime.yaml> <run_id>"""
 
 import os
 import sys
 import time
-import pickle
 import logging
 from pathlib import Path
 
-from typing import List, Optional, Dict
-
-import pandas as pd
 import numpy as np
 
 import yaml
 
 from datasets import split_iid_train_common_test, split_niid_train_common_test, split_class_niid_train_common_test, split_class_niid_train_niid_test, split_iid_train_iid_test, split_niid_train_iid_test, split_niid_train_niid_test, split_subject_train_subject_test, build_global_testloader
-from client import cli_eval_distr_results, cli_val_distr, generate_client_fn#, weighted_average,
+from client import cli_eval_distr_results, cli_val_distr, generate_client_fn
 from server import get_on_fit_config, get_evaluate_fn
 
 from flwr.common import Context
 from flwr.client import ClientApp
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
-from flwr.server.client_manager import ClientManager, SimpleClientManager
+from flwr.server.client_manager import SimpleClientManager
 from flwr.simulation import run_simulation
 
 from custom_strategies.GLow_vanilla import GLow_vanilla
@@ -34,15 +29,13 @@ logging.getLogger("flwr").setLevel(logging.WARNING)
 
 
 def as_list(v):
-    """Runtime switch -> list of rounds; None (empty field) stays None."""
+    # runtime switch -> list of rounds (None stays None)
     return v if v is None or isinstance(v, list) else [v]
 
 
 def slurm_ray_init_args():
-    """Ray sizes its object store and actor pool from the whole node, not from
-    the SLURM cgroup -- under sbatch it oversubscribes the allocation by orders
-    of magnitude. Derive the real limits from SLURM's env vars; return {} when
-    not under SLURM so local runs keep Ray's own detection."""
+    """Ray limits from SLURM's env vars (Ray otherwise sizes itself from the
+    whole node and oversubscribes the allocation); {} outside SLURM."""
     cpus = os.environ.get("SLURM_CPUS_PER_TASK")
     if not cpus:
         return {}
@@ -110,7 +103,7 @@ def main():
         head_status.append(client_runtime['status'])
         head_nature.append(client_runtime['nature'])
     
-    # 2. PREAPRE YOUR DATASET
+    # 2. PREPARE YOUR DATASET
     if cfg['split_dataset'] == 'split_iid_train_common_test':
         trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test = split_iid_train_common_test(num_clients, cfg['num_classes'], tplgy['clients_with_no_data'], cfg['batch_size'], cfg['seed'], cfg['dataset'])
     elif cfg['split_dataset'] == 'split_niid_train_common_test':
@@ -150,7 +143,7 @@ def main():
         on_fit_config_fn=get_on_fit_config(cfg['config_fit']),
         evaluate_fn=get_evaluate_fn(cfg['num_classes'], testloaders, cfg['dataset']),
         fit_metrics_aggregation_fn = cli_val_distr,
-        evaluate_metrics_aggregation_fn = cli_eval_distr_results, #LOCAL METRICS CLIENT
+        evaluate_metrics_aggregation_fn = cli_eval_distr_results,
         total_rounds = cfg['num_rounds'],
         run_id = run_id,
         num_classes=cfg['num_classes'],
@@ -211,7 +204,7 @@ def main():
         num_supernodes=num_clients,
         backend_config=backend_config,
     )
-    # run_simulation() doesn't return a History -- strategy accumulates its own
+    # run_simulation() returns no History; the strategy keeps its own
     history = strategy.history
 
     # 6. SAVE RESULTS
@@ -228,12 +221,13 @@ def main():
 
     join = lambda series: ' '.join(str(elem) for elem in series)
     out = '**round_head_neighbors: ' + join(strategy.round_log)  # (round, head, [nodes aggregated])
-    out += '\n**losses_distributed: ' + join(history.losses_distributed)
-    out += '\n**accuracies_distributed: ' + join(history.metrics_distributed['acc_distr'])
-    out += '\n**losses_avg: ' + join(history.losses_centralized)
-    out += '\n**accuracies_avg: ' + join(history.metrics_centralized['acc_cntrl'])
-    out += '\n**macro_f1: ' + join(history.metrics_centralized['macro_f1'])
-    out = out + '\n**Exec_time_secs: ' + str(time.time() - start_time)
+    out += '\n**losses_val: ' + join(history.losses_distributed)
+    out += '\n**accuracies_val: ' + join(history.metrics_distributed['acc_val'])
+    out += '\n**nodes_val: ' + join(history.metrics_distributed['cid'])  # node of each accuracies_val entry
+    out += '\n**losses_test: ' + join(history.losses_centralized)
+    out += '\n**accuracies_test: ' + join(history.metrics_centralized['acc_test'])
+    out += '\n**macro_f1_test: ' + join(history.metrics_centralized['macro_f1_test'])
+    out += '\n**exec_time_secs: ' + str(time.time() - start_time)
     f = open(save_path + run_id + "_raw.out", "w")
     f.write(out)
     f.close()

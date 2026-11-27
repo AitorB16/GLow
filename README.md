@@ -119,11 +119,11 @@ The output of each experiment consists in the following files:
 
 - **\<run_id>_partitions.out:** Training and test matrices containing number of instances per class per agent
 - **\<run_id>_result_matrix.out:** Matrix of *number_classes * number_classes* per agent with the predictions obtained in the test-set -- raw predictions to compute confussion matrix and further metrics
-- **\<run_id>_heads.out:** Accuracies and Losses obtained by each node head after *n* communication rounds
-- **\<run_id>_traces.out:** Training traces per aggregation per agent per communication round --  in a round-robin configuration, the loop of all the agents is considered a round.
-- **\<run_id>_raw.out:** Full output; *round_head_neighbors* (round, head, nodes aggregated), *losses_distributed*, *accuracies_distributed* (in *round_head_neighbors* order), *losses_avg*, *accuracies_avg*, *macro_f1*, *Exec_time*
+- **\<run_id>_heads.out:** Test loss, accuracy and F1 obtained by each node head after *n* communication rounds; *loss_test*, *acc_test*, *f1_test*
+- **\<run_id>_traces.out:** Training traces per aggregation per agent per communication round --  in a round-robin configuration, the loop of all the agents is considered a round. vanilla: *loss_test*, *acc_test*, *f1_test*, *training_time*, *status*; gossip/navg: *loss_local_test*, *acc_local_test*, *f1_local_test* (agent's own test set), *loss_global_test*, *acc_global_test*, *f1_global_test* (global test set: 20% of every distinct agent test set), *training_time*, *status*
+- **\<run_id>_raw.out:** Full output; *round_head_neighbors* (round, head, nodes aggregated), *losses_val* (vanilla: the head's own validation loss, like *losses_test*; gossip/navg: unweighted mean over nodes with a validation set, like *losses_test*), *accuracies_val* (one per evaluated node), *nodes_val* (node of each *accuracies_val* entry; vanilla: *round_head_neighbors* order, gossip/navg: every active node), *losses_test*, *accuracies_test*, *macro_f1_test*, *exec_time_secs*
 - **\<run_id>_parameters/:** Directory containing torch parameters per agent after *n* communication rounds; *<agent_id>.pth*
-- **\<run_id>_gossip_tracking.csv:** (gossip/navg only) Local and global test loss/accuracy per agent per round, before and after aggregation
+- **\<run_id>_gossip_tracking.csv:** (gossip/navg only) Local and global test loss/accuracy/F1 per agent per round, before (*PRE_GOSSIP*) and after (*POST_GOSSIP*) aggregation; *loss_local_test*, *acc_local_test*, *f1_local_test*, *loss_global_test*, *acc_global_test*, *f1_global_test*
 
 ## Visualization
 

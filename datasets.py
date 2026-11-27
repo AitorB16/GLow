@@ -53,9 +53,7 @@ def get_mnist(data_path: str = ".datasets"):
     return trainset, trainset_eval, testset
 
 class TON_IOT(torch.utils.data.Dataset):
-    """Tabular dataset over a float32 DataFrame whose LAST column is the label.
-    Mirrors the torchvision datasets the split_* partitioners expect: it
-    exposes `.targets` (int class index per item, in __getitem__ order)."""
+    """float32 DataFrame, last column = label; exposes `.targets` like torchvision."""
 
     def __init__(self, data, indices):
         indices = np.asarray(indices)
@@ -102,10 +100,7 @@ HAR_ACTIVITIES = {  # label -> file names it may appear under
 }
 
 class HAR(torch.utils.data.Dataset):
-    """Sensor windows `x` (N, seq_len, 6) with `.targets` (activity label) and
-    `.subjects` (subject id) per item, in __getitem__ order -- `.targets`
-    as the split_* partitioners expect, `.subjects` for
-    split_subject_train_subject_test."""
+    """Windows x (N, seq_len, 6) with per-item `.targets` and `.subjects`."""
 
     def __init__(self, x, targets, subjects):
         self.x = torch.tensor(x, dtype=torch.float32)
@@ -125,12 +120,9 @@ def _har_windows(x, seq_len):
     return [x[i:i + seq_len] for i in range(0, len(x) - seq_len + 1, step)]
 
 def get_har(seed: int, data_path: str = ".datasets/dati_realworld/", seq_len: int = 128, test_ratio: float = 0.2):
-    """RealWorld HAR, forearm accelerometer: one folder per subject
-    (`subject_<id>/acc_<activity>_forearm.csv`, upperarm as fallback).
-    Per subject: x/y/z z-scored, windows cut per recording (a window never
-    spans two activities), 3 zero channels padded to match HARModel's 6 input
-    channels, then a stratified `test_ratio` of its windows held out as test.
-    Subject ids are numbered 0..S-1 in numeric folder order."""
+    """RealWorld HAR accelerometer (forearm, else upperarm), per subject:
+    z-scored, windowed per recording, padded with 3 zero channels, stratified
+    `test_ratio` held out. Subject ids 0..S-1 in folder order."""
     from sklearn.model_selection import train_test_split
 
     subject_dirs = sorted(
@@ -184,15 +176,13 @@ def _get_dataset(dataset: str, seed: int):
 
 
 def _clients_with_data(num_clients: int, clients_with_no_data: list[int]) -> list[int]:
-    """IDs of clients that receive a data partition (all of them if none are excluded)."""
     if not clients_with_no_data:
         return list(range(num_clients))
     return [i for i in range(num_clients) if i not in clients_with_no_data]
 
 
 def _partition_indices(index_pool, lengths, seed):
-    """Deterministically shuffle `index_pool` (a 1-D np.array) and slice it
-    into `len(lengths)` chunks of the given sizes."""
+    """Seeded shuffle of `index_pool`, sliced into chunks of `lengths`."""
     index_pool = np.asarray(index_pool)
     perm = np.random.default_rng(seed).permutation(len(index_pool))
     shuffled = index_pool[perm]
@@ -205,9 +195,7 @@ def _partition_indices(index_pool, lengths, seed):
 
 
 def _client_train_val_loaders(indices, trainset, trainset_eval, val_ratio, batch_size, seed):
-    """Split `indices` (positions into `trainset`/`trainset_eval`, which
-    must be the same underlying data under different transforms) into a
-    train/val subset for one client."""
+    """One client's train/val loaders (trainset_eval: same data, test transform)."""
     indices = np.asarray(indices)
     if len(indices) == 0:
         return '', ''
@@ -239,8 +227,7 @@ def _client_test_loader(indices, testset, batch_size, seed):
     )
 
 def split_iid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
-    """IID training data (equal-sized random splits) plus one shared test set
-    identical for every client."""
+    """IID train split; one test set shared by all clients."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -293,10 +280,7 @@ def split_iid_train_common_test(num_clients: int, num_classes: int, clients_with
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 def split_class_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: float, val_ratio: float = 0.1):
-    """"Fine" per-class Dirichlet skew (`alpha<0.1`, strongly skewed): each
-    class is independently Dirichlet-split across `clients_with_data`, giving
-    direct per-client per-class control -- the standard FL class-skew
-    partitioning. Test set is shared for every client."""
+    """Per-class Dirichlet train split; shared test set."""
 
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
@@ -349,11 +333,7 @@ def split_class_niid_train_common_test(num_clients: int, num_classes: int, clien
 
 
 def split_class_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: float, val_ratio: float = 0.1):
-    """Same per-class Dirichlet skew as `split_class_niid_train_common_test`,
-    but the same per-class proportions (`dirichlet_props`, drawn once from
-    the train split) are reapplied to independently partition the test set --
-    each client's test set mirrors its own train set's class distribution
-    without sharing samples with anyone else."""
+    """Per-class Dirichlet split; the test set is split with the same proportions."""
 
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
@@ -423,8 +403,7 @@ def split_class_niid_train_niid_test(num_clients: int, num_classes: int, clients
 
 
 def split_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
-    """IID training data plus an independently IID-partitioned test set,
-    split evenly across all `num_clients`."""
+    """IID train split; IID test split across all clients."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -492,8 +471,7 @@ def split_iid_train_iid_test(num_clients: int, num_classes: int, clients_with_no
 
 
 def split_niid_train_common_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: list[float], val_ratio: float = 0.1):
-    """"Coarse" Dirichlet-skewed training data. Test set is shared for
-    every client."""
+    """Dirichlet split of client sizes; shared test set."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -549,8 +527,7 @@ def split_niid_train_common_test(num_clients: int, num_classes: int, clients_wit
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: list[float], val_ratio: float = 0.1):
-    """"Coarse" Dirichlet-skewed training data plus an independently IID-partitioned
-    test set split evenly across all `num_clients`."""
+    """Dirichlet split of client sizes; IID test split across all clients."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -622,10 +599,7 @@ def split_niid_train_iid_test(num_clients: int, num_classes: int, clients_with_n
 
 
 def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, alpha: list[float], val_ratio: float = 0.1):
-    """"Coarse" Dirichlet-skewed training data plus
-    a test set skewed the same way: the identical `dirich` proportions drawn
-    for the train split slice the shuffled test set into
-    per-client chunks."""
+    """Dirichlet split of client sizes; test set split with the same proportions."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -697,10 +671,8 @@ def split_niid_train_niid_test(num_clients: int, num_classes: int, clients_with_
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 def split_subject_train_subject_test(num_clients: int, num_classes: int, clients_with_no_data: list[int], batch_size: int, seed: int, dataset: str, val_ratio: float = 0.1):
-    """Natural per-subject split for datasets that record who produced each
-    sample (`.subjects`, e.g. 'har'): the k-th client with data gets subject
-    k's train windows (minus a `val_ratio` validation share) and subject k's
-    own test windows. Needs exactly one subject per client with data."""
+    """k-th client with data gets subject k's train/test windows (needs `.subjects`,
+    one subject per client with data)."""
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
@@ -744,10 +716,8 @@ def split_subject_train_subject_test(num_clients: int, num_classes: int, clients
     return trainloaders, validationloaders, testloaders, class_client_matrix_train, class_client_matrix_test
 
 def build_global_testloader(testloaders, batch_size: int, seed: int, fraction: float = 0.2):
-    """Global test set for GLow_gossip: a random
-    `fraction` of every distinct node test set, concatenated. Distinct by
-    dataset object, so *_common_test splits (one shared loader) contribute
-    once. Dataless nodes ('') are skipped."""
+    """gossip/navg global test set: `fraction` of each distinct node test set
+    (a shared test set counts once)."""
     generator = torch.Generator().manual_seed(seed)
     parts, seen = [], set()
     for loader in testloaders:

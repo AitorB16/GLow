@@ -1,41 +1,15 @@
-''' PATH: .venv/lib/python3.10/site-packages/flwr/server/strategy/aggregate.py'''
+# Copyright 2020 Flower Labs GmbH. Modified for GLow.
+# SPDX-License-Identifier: Apache-2.0
+"""Vendored from flwr/server/strategy/aggregate.py, plus GLow's aggregators
+(dispatched by GLow_vanilla.aggregate_fit):
 
-# Copyright 2020 Flower Labs GmbH. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-"""Aggregation functions vendored from `flwr.server.strategy.aggregate`,
-extended with GLow's trust-weighted strategies, dispatched by
-GLow_vanilla.aggregate_fit() via `self.aggregation`:
+- aggregate_inplace ('inplace'): sample-weighted average
+- aggregate_score / aggregate_score_validation: weighted by test / self-reported accuracy
+- aggregate_score_centroids_2 ('approach_2'), aggregate_score_centroids_2b ('approach_2b')
+- aggregate_trimmed_mean ('trimmed_mean')
+- aggregate_krum ('krum'): Flower's Krum/MultiKrum
 
-- `aggregate_inplace` ('inplace'): plain sample-count-weighted average.
-- `aggregate_score`/`aggregate_score_validation`: weight by each
-  neighbour's own accuracy (centralized / self-reported).
-- `aggregate_score_centroids_2` ('approach_2'): per-class distance/
-  confidence/size score.
-- `aggregate_score_centroids_2b` ('approach_2b'): approach_2 with distance
-  on the neighbour's val set and confidence on the head's.
-- `aggregate_trimmed_mean` ('trimmed_mean'): coordinate-wise trimmed mean
-  over the head's and its neighbours' models.
-- `aggregate_krum` ('krum'): Flower's Krum/MultiKrum, adapted to take
-  `{topology_index: FitRes}`.
-
-Flower's other generic/Byzantine-robust aggregation rules (its own
-trimmed-average, Q-FFL, plain median/weighted-average) are kept below the GLow
-ones -- none of them are wired into this dispatch.
-
-`results` is `{topology_index: FitRes}` -- built via `_cid_to_index` since
-ClientProxy.cid is an opaque simulation id, not the topology index.
+`results` is {topology_index: FitRes}. The remaining Flower functions are unused.
 """
 
 from functools import reduce
@@ -46,10 +20,9 @@ import json
 
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 
-from scipy.spatial.distance import pdist, cdist, squareform, euclidean, cosine
 
 def self_learning(results: Dict[int, FitRes], neighbours: List[int], head_id: int) -> NDArrays:
-    """Self-Learning."""
+    """The head's own model, unaggregated."""
     ordered_results = [(n, results[n]) for n in neighbours if n in results]
     params = []
     for idx, fit_res in ordered_results:
@@ -84,10 +57,8 @@ def aggregate_inplace(results: Dict[int, FitRes]) -> NDArrays:
 
 
 def aggregate_score(results: Dict[int, FitRes], neighbour_metrics: List[float], neighbours: List[int], head_id: int) -> NDArrays:
-    """Weighted average where each neighbour's weight is its own centralized
-    test-set accuracy from `neighbour_metrics` (the head instead uses its own
-    just-reported `acc_val_distr`, since it has no `neighbour_metrics` entry
-    for itself). Weights normalized to sum to 1."""
+    """Neighbours weighted by their test accuracy (`neighbour_metrics`), the
+    head by its reported `acc_val_distr`."""
 
     ordered_results = [(n, results[n]) for n in neighbours if n in results]
 
@@ -110,8 +81,7 @@ def aggregate_score(results: Dict[int, FitRes], neighbour_metrics: List[float], 
                 else:
                     scaling_factors.append(0.)
     else:
-        # no usable accuracy signal from anyone -- equal weighting instead
-        # of silently zeroing out the aggregated model
+        # no accuracy signal: equal weights
         scaling_factors = [1. / len(ordered_results)] * len(ordered_results)
 
     params = [
@@ -125,9 +95,7 @@ def aggregate_score(results: Dict[int, FitRes], neighbour_metrics: List[float], 
     return params
 
 def aggregate_score_validation(results: Dict[int, FitRes], neighbours: List[int], head_id: int) -> NDArrays:
-    """Like `aggregate_score`, but every participant (including the head) is
-    weighted by its own self-reported `acc_val_distr` -- cheaper (no extra
-    evaluation pass) but trusts each client's own report."""
+    """Every participant weighted by its self-reported `acc_val_distr`."""
 
     ordered_results = [(n, results[n]) for n in neighbours if n in results]
 
@@ -163,35 +131,32 @@ def aggregate_score_centroids_2(
     beta: float = 0.33,
     gamma: float = 0.33
 ) -> NDArrays:
-    """approach_2: per-class score `distance**alpha * confidence**beta *
-    size**gamma` per neighbour, normalized per class then summed and
-    renormalized into one weight per neighbour. `distance` is Euclidean
-    distance between head/neighbour mean predicted-probability vectors per
-    class (`prob_matrix`). `confidence` is the node's recall on its own val
-    set where that set has the class, else its recall on the head's val set."""
+    """Per class score distance**alpha * confidence**beta (size**gamma off),
+    normalized per class, summed into one weight per neighbour.
+    distance: L2 between head/neighbour mean softmax rows on the head's val set.
+    confidence: recall on own val set if it has the class, else on the head's."""
 
-    #log(INFO, "Strategy Aggregation for Head Client %s - Neighbours %s - (Round %s)", head_id, neighbours, current_round)
     eff_alpha, eff_beta, eff_gamma = alpha, beta, gamma
 
     ordered_results = [(n, results[n]) for n in neighbours if n in results]
     if head_id not in results:
-        raise ValueError(f"Head {head_id}'s own fit() result is missing -- cannot aggregate without it.")
+        raise ValueError(f"Head {head_id}'s fit() result is missing.")
     present_neighbours = [n for n, _ in ordered_results]
 
     metrics_map = {idx: fit_res.metrics for idx, fit_res in ordered_results}
 
     effective_matrix = [list(row) for row in class_client_matrix]
 
-    # true (pre-substitution) per-class coverage, for the DISTANCE gate below
+    # train-set class coverage, before the size substitution below
     has_class = {n: [class_client_matrix[n][c] > 0 for c in range(class_number)] for n in present_neighbours}
 
-    # CONFIDENCE -- crosses the wire JSON-encoded (legacy config bridge)
+    # CONFIDENCE
     v_conf = np.zeros((len(present_neighbours), class_number))
     for j, neighbour in enumerate(present_neighbours):
         m = metrics_map[neighbour]
         v_conf[j] = np.where(json.loads(m['own_val_has']), json.loads(m['recall_own']), json.loads(m['recall_head']))
 
-    # SIZE -- normalized by total across neighbours per class
+    # SIZE: share of the class across neighbours
     v_norm_size = []
     for j, neighbour in enumerate(present_neighbours):
         counts = np.array(effective_matrix[neighbour], dtype=float)
@@ -212,7 +177,7 @@ def aggregate_score_centroids_2(
         v_norm_size.append(normed)
 
 
-    # DISTANCE -- prob_matrix
+    # DISTANCE
     head_prob_matrix = np.array(json.loads(metrics_map[head_id]['prob_matrix'])).reshape(class_number, class_number)
     v_distance = np.ones((len(present_neighbours), class_number))
 
@@ -249,8 +214,6 @@ def aggregate_score_centroids_2(
     sum_weights = np.sum(global_score_client)
     weights = global_score_client / sum_weights if sum_weights > 0 else np.ones(len(present_neighbours)) / len(present_neighbours)
 
-    #log(INFO, "Aggregation Weights: %s", np.round(weights, 4))
-
     aggregated_params = [np.zeros_like(layer) for layer in parameters_to_ndarrays(ordered_results[0][1].parameters)]
     for w, (_, fit_res) in zip(weights, ordered_results):
         client_layers = parameters_to_ndarrays(fit_res.parameters)
@@ -269,22 +232,13 @@ def aggregate_score_centroids_2b(
     alpha: float = 0.4,
     beta: float = 0.6,
 ) -> NDArrays:
-    """approach_2b: approach_2 with the data behind its two signals swapped.
-
-    approach_2   distance: head's val set       confidence: neighbour's val set
-    approach_2b  distance: neighbour's val set  confidence: head's val set
-
-    distance[n][c]: `dist_N` reported by n (L2 between its and the head's
-      mean-softmax rows on n's own val set), gated on train-set class
-      coverage as in approach_2.
-    confidence[n][c]: n's recall on the head's val set (`recall_head`); for
-      classes absent from the head's val set it falls back to n's recall on
-      its own val set (`recall_own`).
-    score = distance**alpha * confidence**beta, normalized per class, summed,
-    renormalized into one weight per neighbour."""
+    """approach_2 with the val sets swapped:
+    distance: n's `dist_N` (on n's own val set), gated as in approach_2.
+    confidence: n's recall on the head's val set, or on its own for classes
+    the head's val set lacks."""
 
     if head_id not in results:
-        raise ValueError(f"Head {head_id}'s own fit() result is missing -- cannot aggregate without it.")
+        raise ValueError(f"Head {head_id}'s fit() result is missing.")
     ordered = [(n, results[n]) for n in neighbours if n in results]
     head_checks = np.array(json.loads(results[head_id].metrics['own_val_has']))
     head_has = np.array(class_client_matrix[head_id]) > 0
@@ -315,10 +269,8 @@ def aggregate_score_centroids_2b(
 
 
 def aggregate_trimmed_mean(results: Dict[int, FitRes], trim: int = 1) -> NDArrays:
-    """Coordinate-wise trimmed mean: per parameter, drop the `trim` highest
-    and `trim` lowest values among the models and average the rest. With too
-    few models, `trim` shrinks so at least one value is kept (3 models and
-    trim=1 -> the median; 1 or 2 models -> plain mean)."""
+    """Per coordinate, drop the `trim` highest and lowest values and average
+    the rest (trim shrinks with few models: 3 -> median, 1-2 -> mean)."""
     models = [parameters_to_ndarrays(results[idx].parameters) for idx in sorted(results)]
     k = min(trim, (len(models) - 1) // 2)
     params = []
